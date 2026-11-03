@@ -152,36 +152,50 @@ expect_allow ip netns exec "$wan" ping -n -c 1 -W 2 198.18.0.1
 { echo 'delete table inet portcullis_guard'; cat "$tmp/timed.nft"; } > "$tmp/switch.nft"
 ip netns exec "$gw" nft -c -f "$tmp/switch.nft"
 ip netns exec "$gw" nft -f "$tmp/switch.nft"
-expect_block ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+expect_drop portcullis_lab guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 printf 'add element inet portcullis_lab test_allow_v4 { 10.203.0.2 timeout 60s }\n' > "$tmp/allow.nft"
 ip netns exec "$gw" nft -f "$tmp/allow.nft"
 expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
-expect_block ip netns exec "$guest" ping -n -c 1 -W 2 10.204.0.2
-expect_block ip netns exec "$guest" ping -n -c 1 -W 2 10.203.0.1
-expect_block ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:204::2
+expect_drop portcullis_lab guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 10.204.0.2
+expect_drop portcullis_lab guest_input ip netns exec "$guest" ping -n -c 1 -W 2 10.203.0.1
+expect_drop portcullis_lab guest_forward ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:204::2
 ip -n "$guest" addr add 10.203.0.3/24 dev eth0
-expect_block ip netns exec "$guest" ping -n -c 1 -W 2 -I 10.203.0.3 198.18.0.2
+expect_drop portcullis_lab guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 -I 10.203.0.3 198.18.0.2
 
 echo "Checking explicit revocation terminates an existing TCP stream"
 ip netns exec "$wan" python3 "$root/tests/netns/tcp_fixture.py" server --ready "$tmp/server.ready" &
 server_pid="$!"
 wait_for_file "$tmp/server.ready"
-ip netns exec "$guest" python3 "$root/tests/netns/tcp_fixture.py" client --ready "$tmp/client.ready" --trigger "$tmp/revoke.now" --result "$tmp/client.result" &
+ip netns exec "$guest" python3 "$root/tests/netns/tcp_fixture.py" client --ready "$tmp/client.ready" --trigger "$tmp/revoke.now" --result "$tmp/client.result" --resume "$tmp/restore.now" &
 client_pid="$!"
 wait_for_file "$tmp/client.ready"
 printf 'delete element inet portcullis_lab test_allow_v4 { 10.203.0.2 }\n' > "$tmp/revoke.nft"
 ip netns exec "$gw" nft -f "$tmp/revoke.nft"
+before_revoke="$(drop_count portcullis_lab guest_forward)"
 touch "$tmp/revoke.now"
-wait "$client_pid" || fail "TCP revocation client failed"
+wait_for_file "$tmp/client.result"
+[[ "$(cat "$tmp/client.result")" == "timeout" ]] || fail "TCP revocation did not time out"
+kill -0 "$server_pid" || fail "server died during revoked interval"
+[[ ! -f "$tmp/server.ready.2" ]] || fail "revoked TCP payload reached the server"
+after_revoke="$(drop_count portcullis_lab guest_forward)"
+(( after_revoke > before_revoke )) || fail "no forwarded TCP packet was dropped"
+# Regrant while the connection remains open; prove the SAME TCP socket can
+# receive the queued server response. A failed/dead peer cannot pass.
+printf 'add element inet portcullis_lab test_allow_v4 { 10.203.0.2 timeout 20s }\n' > "$tmp/restore.nft"
+ip netns exec "$gw" nft -f "$tmp/restore.nft"
+touch "$tmp/restore.now"
+wait "$client_pid" || fail "same-socket TCP recovery failed"
 client_pid=""
-[[ "$(cat "$tmp/client.result")" == "blocked" ]] || fail "established TCP survived revocation"
-expect_block ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+[[ "$(cat "$tmp/client.result")" == "recovered" ]] || fail "connection failed to recover"
+[[ -f "$tmp/server.ready.2" ]] || fail "server never received the restored payload"
+ip netns exec "$gw" nft -f "$tmp/revoke.nft"
+expect_drop portcullis_lab guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 
 echo "Checking kernel timeout expires a grant without any userspace daemon"
 printf 'add element inet portcullis_lab test_allow_v4 { 10.203.0.2 timeout 3s }\n' > "$tmp/short.nft"
 ip netns exec "$gw" nft -f "$tmp/short.nft"
 expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 sleep 4
-expect_block ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+expect_drop portcullis_lab guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 
 echo "PASS: isolated default-deny, IPv4/IPv6, timed grant, protected LAN, TCP revocation"
