@@ -1,12 +1,14 @@
 # Portcullis
 
-An independent, open-source Linux captive-portal gateway for self-hosted guest access. This repository is at **Phase 1 foundation**, not a functioning gateway.
+An independent, open-source Linux captive-portal gateway for self-hosted guest access. This repository is **not yet a functioning gateway**.
 
 ## Status
 
-Implemented: a small standard-library Go package for bounded, volatile guest lease decision records (up to fifteen minutes, one active record per client label, maximum 1,024 records), with unit and concurrency tests.
+**Phase 1:** a standard-library Go package for bounded, volatile guest lease decision records (up to fifteen minutes, one active record per client label, maximum 1,024 records), with unit and concurrency tests.
 
-**Not implemented:** verified network client identity, captive portal, packet enforcement, DHCP/DNS, nftables integration, persistent configuration, dashboard, and payments. The lease ID is a bearer secret, not authorization to route packets. Nothing here should be deployed to protect a network.
+**Phase 2 (in development):** a pure Go renderer for a default-deny nftables baseline. It only emits text and **does not install rules**. It denies all guest INPUT/FORWARD traffic and does not support guest authorization yet. See [Phase 2 notes](docs/phase2.md).
+
+**Not implemented:** verified network client identity, captive portal, packet enforcement integration, DHCP/DNS, nftables installation, persistent configuration, dashboard, and payments. The lease ID is a bearer secret, not authorization to route packets. Nothing here should be deployed to protect a network.
 
 ## Build and test
 
@@ -21,7 +23,7 @@ test -z "$(gofmt -l .)"
 
 ## Architecture and development
 
-See [docs/architecture.md](docs/architecture.md) and [docs/validation.md](docs/validation.md). The intended deployment uses a Linux mini-PC, managed VLAN-capable switch, and guest access point, subject to site-specific inventory and recovery testing. No scripts in this repository modify host networking.
+See [docs/architecture.md](docs/architecture.md), [docs/validation.md](docs/validation.md) and [docs/phase2.md](docs/phase2.md). The intended deployment uses a Linux mini-PC, managed VLAN-capable switch, and guest access point, subject to site-specific inventory and recovery testing. No scripts in this repository modify host networking.
 
 ## Licensing
 
