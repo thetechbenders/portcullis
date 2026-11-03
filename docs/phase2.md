@@ -1,27 +1,27 @@
-# Phase 2: persistent deny baseline (first slice)
+# Phase 2: deny baseline and isolated integration lab
 
-## Status
+## Verified scope
 
-The `internal/enforce` Go package renders a deliberately restrictive nftables **inet** ruleset fragment from a validated guest interface name. No commands run and no system state is modified. The fragment drops ALL packets from the named interface on **INPUT** and **FORWARD**, for IPv4 and IPv6, including packets in established conntrack flows. It does not yet support client authorization, DHCP, DNS or a captive portal. Do not install it on a production network.
+`internal/enforce` produces nftables `inet` ruleset text for validated interface names. The production-oriented `RenderDenyBaseline` has guest INPUT and FORWARD drops for IPv4/IPv6 with no permits. The `RenderTimedFixturePolicy` exists **only to demonstrate packet filtering mechanics inside a disposable test lab**: it uses an empty kernel set and can temporarily permit fixture guest IPv4 traffic only to a fixture uplink. Source IP is forgeable and **is not an authorization identity**.
 
-The generated table is named `portcullis_guard`; the two filter base chains have priority `-50`. Their default policy is `accept` solely to avoid changing traffic from other interfaces. The guest ingress match takes precedence for guest traffic. The fragment is independent of any future privileged daemon and contains no owner lifetime flag.
+GitHub-hosted Linux namespace tests now syntax-check the generated text with `nft -c -f`, install it solely inside a disposable gateway namespace, and validate real packet behavior. They cover IPv4/IPv6 guest INPUT and FORWARD denial, protected LAN isolation, fixture timed permits, kernel timeout, and immediate blocking of an established TCP application exchange after an allow-set element is removed. See [the lab](../tests/netns/README.md).
 
-**Operational warning:** nftables rules depend on netfilter hook ordering. No host firewall inspection, nft parser verification, namespace packet test or production deployment has happened yet. Rendering a string is not proof of enforcement or of compatibility with the existing firewall.
+**The project still has no production installer, privileged controller, verified identity source, conntrack cleanup, boot-persistent firewall deployment, DHCP/DNS or captive portal.** CI passing does not establish compatibility with a host's existing nftables policy or its physical network.
 
 ## Security and extension constraints
 
-1. Before enabling a guest VLAN, install and verify a persistent boot-time default-deny policy. Preserve existing firewall rules and management connectivity. Verify that no permitted traffic path can bypass the gateway.
-2. Do not try to add a separate permissive base chain or blindly insert an `accept` into another table to authorize a client. A drop in the guest baseline is terminal. Future authorized and preauthorized exceptions must be safely integrated **ahead of the final guest drop in these chains**, with review of all other rules/hook priorities.
-3. Separate the unprivileged HTTP service from a narrowly authenticated privileged controller. The guest browser must never call a raw nftables command endpoint.
-4. Do not authorize packets using a browser-reported MAC/IP or bearer ID alone. Source binding needs independently observed interface, address and attachment evidence, with reassignment and spoofing tests.
-5. Use bounded kernel set timeouts at or below the remaining lease lifetime. Authorization on forwarded traffic must be checked on every packet before broad established-connection allowances. Revoke affected conntrack state on logout/expiry and verify loss of existing TCP/UDP flows.
-6. Keep guest IPv6 denied for MVP, including link-local access to host management. IPv6 policy and AP-local bridge/client isolation require separate tests.
-7. Consider the process missing or failed whenever desired policy cannot be safely reconciled. Do not install permits on error, and do not delete the baseline deny as part of process cleanup.
+1. Install and verify a persistent default-deny INPUT/FORWARD firewall before ever enabling a guest VLAN. The baseline must survive service crash/restart and remain independent of user-space authorization management.
+2. A terminal nftables drop cannot be overridden by an accept in another base chain. Any future permit belongs before the guest drop in the correct path, with atomic transitions that never expose an allow-all gap. The test fixture deletes and recreates a table **only inside its disposable namespace**. This method is forbidden in deployment.
+3. Isolate unprivileged HTTP parsers from a narrowly authenticated privileged controller. Guest traffic must never reach a general-purpose nftables command API.
+4. Bind network clients to trusted attachment observations, not a browser-supplied IP/MAC or a lease bearer ID. Prevent spoofing and reassignment races. The source-IP-only fixture is deliberately unfit for production.
+5. Use bounded kernel allow-set timeouts no longer than the remaining valid lease duration; check guest authorization on every forwarded packet, including established flows. For logout/expiry also remove associated conntrack state. The current tests prove traffic is blocked, **not that conntrack entries are deleted**.
+6. IPv6 remains denied for MVP, including host link-local access. Isolate AP-local bridging, inter-client and AP-management paths independently of gateway routing.
+7. Controller failures, transaction failures, clock jumps, suspend/resume and reboot must never restore expired grants or remove the persistent deny. No automatic fail-open fallback.
 
 ## Next verification gates
 
-- Execute `go test ./...`, `go test -race ./...`, `go vet ./...`, and `gofmt` in CI.
-- Validate generated rules with `nft -c -f` in a disposable Linux namespace, never against a live ruleset.
-- Implement netns guest, gateway, protected-LAN and upstream fixtures with packet-level IPv4/IPv6 tests.
-- Add atomic allow-set and kernel timeout handling only after the identity contract, existing-rules integration and revocation semantics are reviewed.
-- No live Hephaestus, UniFi or Slate modification until the previously documented privilege, management and recovery gates pass.
+- Design trustworthy client attachment observation and bounded identity/lease mapping, with tests against address reassignment and spoofing.
+- Build a privileged controller with atomic nftables transactions and a narrow authenticated IPC, without permitting the guest portal to manipulate arbitrary rules.
+- Prove persistence across daemon failure and reboot, reliable expiry and actual conntrack teardown, and robustness against rollback or partial application.
+- Add pre-auth DHCP/DNS/portal access only after kernel enforcement remains fail-closed through adversarial testing.
+- Inspect the existing Hephaestus/UniFi/Slate configuration and recovery path before considering any physical integration. No production changes are authorized.

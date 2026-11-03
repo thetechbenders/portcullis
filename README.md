@@ -1,14 +1,14 @@
 # Portcullis
 
-An independent, open-source Linux captive-portal gateway for self-hosted guest access. This repository is **not yet a functioning gateway**.
+An independent, open-source Linux captive-portal gateway for self-hosted guest access. This repository is **not yet a deployable gateway**.
 
 ## Status
 
-**Phase 1:** a standard-library Go package for bounded, volatile guest lease decision records (up to fifteen minutes, one active record per client label, maximum 1,024 records), with unit and concurrency tests.
+**Phase 1 merged:** a standard-library Go package for bounded, volatile guest lease decision records (maximum fifteen minutes, one active record per client label, maximum 1,024 records), with unit and concurrency tests.
 
-**Phase 2 (in development):** a pure Go renderer for a default-deny nftables baseline. It only emits text and **does not install rules**. It denies all guest INPUT/FORWARD traffic and does not support guest authorization yet. See [Phase 2 notes](docs/phase2.md).
+**Phase 2 draft PR:** an inert Go nftables deny-baseline renderer, plus a disposable four-namespace Linux integration laboratory and an explicitly unsafe test-only timed IPv4 allow-set fixture. The CI lab validates default-deny IPv4/IPv6 packet paths, protected LAN isolation, test grants, kernel expiration, and revocation of an established TCP exchange. See [Phase 2 notes](docs/phase2.md) and [lab documentation](tests/netns/README.md).
 
-**Not implemented:** verified network client identity, captive portal, packet enforcement integration, DHCP/DNS, nftables installation, persistent configuration, dashboard, and payments. The lease ID is a bearer secret, not authorization to route packets. Nothing here should be deployed to protect a network.
+**Not implemented:** verified network client identity, captive portal, production nftables controller, boot-persistent baseline, secure allow-set IPC, DHCP/DNS, trusted deployment, persistent configuration, dashboard, and payments. Lease IDs are bearer secrets, not proof of network identity. **Do not install the fixture rules on a real guest network.**
 
 ## Build and test
 
@@ -21,9 +21,11 @@ go vet ./...
 test -z "$(gofmt -l .)"
 ```
 
+The optional namespace integration test requires an isolated disposable Linux VM/runner with root, nftables, iproute2, iputils-ping, and Python 3. It is run automatically in pull-request CI. See the lab documentation before attempting to execute it manually.
+
 ## Architecture and development
 
-See [docs/architecture.md](docs/architecture.md), [docs/validation.md](docs/validation.md) and [docs/phase2.md](docs/phase2.md). The intended deployment uses a Linux mini-PC, managed VLAN-capable switch, and guest access point, subject to site-specific inventory and recovery testing. No scripts in this repository modify host networking.
+See [docs/architecture.md](docs/architecture.md), [docs/validation.md](docs/validation.md), [docs/phase2.md](docs/phase2.md), and [tests/netns/README.md](tests/netns/README.md). The intended deployment uses a Linux mini-PC, managed VLAN-capable switch, and guest access point, subject to site-specific inventory and recovery testing. Only the explicitly invoked disposable integration harness creates network namespaces.
 
 ## Licensing
 
