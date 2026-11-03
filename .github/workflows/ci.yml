@@ -23,3 +23,20 @@ jobs:
         run: go vet ./...
       - name: Formatting
         run: test -z "$(gofmt -l .)"
+      - name: Script syntax
+        run: bash -n tests/netns/run.sh && python3 -m py_compile tests/netns/tcp_fixture.py
+  netns:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install isolated lab prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nftables iproute2 iputils-ping
+      - name: Compile policy renderer
+        run: go build -o "${{ runner.temp }}/portcullis-policy" ./cmd/portcullis-policy
+      - name: Namespace packet integration tests
+        run: sudo bash tests/netns/run.sh "${{ runner.temp }}/portcullis-policy"
