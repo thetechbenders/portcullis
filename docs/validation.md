@@ -1,20 +1,21 @@
 # Validation contract
 
-## Available evidence
+## Verified on disposable hosted Linux
 
-`go test ./...`, `go test -race ./...`, `go vet ./...` and repository-wide `gofmt` cover bounded lease records and the inert policy renderer. The build-tagged `netnslab` fixture has separate Go checks and cannot be invoked by the normal policy CLI.
+Go checks include `go test ./...`, `go test -race ./...`, `go vet ./...`, formatting and separate `netnslab` build-tagged fixture tests.
 
-The GitHub-hosted disposable netns CI job checks nftables syntax, basic packet routing preconditions, and guest IPv4/IPv6 INPUT and FORWARD drops with direction-specific nftables counter deltas. Static IPv6 gateway neighbor mapping avoids neighbor-discovery-only false positives. The test-only source-IP set demonstrates kernel expiry and, for one existing TCP connection, loss of an exchange after revocation with later recovery on the same socket.
+The four-namespace integration lab verifies nft syntax/loading, pre-policy IPv4/IPv6 positive routing controls, and nftables drop-counter deltas for guest INPUT and **bidirectional guest FORWARD**. Both WAN and protected-LAN sources are denied from reaching the guest under the baseline. It additionally tests existing-table reapplication, removing injected broad grant rules, rejecting a malformed atomic transaction without losing deny, and restoring the exact intended rule count.
 
-These are **direction-limited lab observations**, not a verified production firewall. A socket being blocked does not prove the conntrack entry was deleted. The fixture source-IP allow-set is deliberately not a trusted client-authentication mechanism.
+The deliberately unsafe test-only grant checks bounded IPv4 guest-to-upstream forwarding, controlled established replies, kernel expiration, TCP blocked delivery on revocation and same-socket recovery on test regrant. The server liveness and nft counters prevent treating an unrelated dead TCP server as a successful firewall revocation.
 
-## Required for any real deployment
+## Not established for production
 
-- Bidirectional guest isolation and separate proof of other-host-IP and IPv6 link-local blocking.
-- Safe atomic, idempotent policy updates; no stale permits when policies are replaced, no fail-open gap on reload, crash, shutdown or reboot.
-- Verify actual interface identity/parent, VLAN/bridge arrangements, physical switch/AP isolation and all other active nftables, bridge, flowtable, tc and XDP paths.
-- Reliable authenticated client attachment identity, anti-spoofing, address reassignment and DHCP binding.
-- Bounded kernel allow-set expiry derived from lease duration, true conntrack cleanup, UDP and reverse-direction flow revocation.
-- Least-privilege controller and authenticated narrowly scoped IPC from the portal.
-- Failure-injection tests of boot, reload, external ruleset flush, watchdog response and rollback, before connecting actual guest traffic.
-- No changes to real gateway/network equipment without independent recovery, rollback and explicit deployment authorization.
+- Persistent deny under real system boot, firewall reload/flush and daemon failures.
+- Verified guest interface identity and parent, bridge VLAN topology, flowtable/offload/tc/XDP bypass protection.
+- Host-initiated OUTPUT to a guest and AP-local traffic isolation.
+- Trusted attachment identity, client anti-spoofing and address reassignment.
+- Authenticated privileged controller, safe allow-set operations and real conntrack deletion.
+- DHCP/DNS, captive portal preauthorization, management access and physical equipment isolation.
+- UDP session/revocation tests and expiry of an established stream (distinct from new packet timeout tests).
+
+No real network has been modified and the rendered batch is not an approved deployment mechanism.

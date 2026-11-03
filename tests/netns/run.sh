@@ -175,6 +175,13 @@ expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -n -c 1 -
 expect_drop portcullis_guard guest_forward ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
 forward_rules="$(ip netns exec "$gw" nft -j list chain inet portcullis_guard guest_forward | python3 -c 'import json,sys; print(sum("rule" in e for e in json.load(sys.stdin)["nftables"]))')"
 [[ "$forward_rules" -eq 2 ]] || fail "stale rules survived atomic replacement"
+# A broken transaction must reject the whole batch and preserve the deny.
+{ cat "$tmp/baseline.nft"; echo 'add rule inet portcullis_guard guest_forward this_is_not_a_valid_expression'; } > "$tmp/invalid.nft"
+if ip netns exec "$gw" nft -f "$tmp/invalid.nft" >/dev/null 2>&1; then
+  fail "invalid firewall transaction was accepted"
+fi
+expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+expect_drop portcullis_guard guest_forward ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
 
 # Switch the policy ONLY in this throwaway namespace. Never use the test
 # source-IP fixture as a production identity/authorization mechanism.

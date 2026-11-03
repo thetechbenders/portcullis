@@ -6,11 +6,11 @@ An independent, open-source Linux captive-portal gateway for self-hosted guest a
 
 **Phase 1 merged:** bounded, volatile Go lease records (maximum fifteen minutes, one active record per client label, maximum 1,024 records) with unit and concurrency tests.
 
-**Phase 2 in draft review:** an inert Go nftables guest ingress deny-baseline renderer, and a disposable four-namespace Linux integration lab. The lab has its own build-tagged `netnslab` policy generator that allows source-IP-based timed grants **only for test fixtures**. No unsafe grant option is available in the normal `portcullis-policy` binary.
+**Phase 2 draft PR:** a pure Go generator for a guest firewall deny baseline and a disposable four-namespace Linux packet-testing lab. The policy now filters forwarded traffic in **both directions** and emits a single nftables batch that atomically replaces its owned table on first or subsequent application. The lab verifies removal of injected stale permits, rejects a deliberately invalid transaction without losing the active deny, and tests IPv4/IPv6 ingress, egress, test grants, kernel expiry, and established TCP revocation. Its unsafe source-IP authorization fixture is confined to a separately built `netnslab` binary and table.
 
-Hosted Linux CI has demonstrated syntax/load of the generated rules, IPv4/IPv6 guest INPUT and FORWARD drops with matching nftables counters, guest-to-protected-LAN denial, test grants, kernel expiry, and interrupting an existing TCP exchange with successful recovery on the same socket after restoring a test grant.
+**Not implemented:** production firewall installation or ownership; host-to-guest OUTPUT policy; trusted network identity; reload/boot persistence; flowtable/bridge bypass detection; conntrack cleanup; privileged controller and IPC; captive portal; DHCP/DNS; dashboard; payments.
 
-**Not implemented:** trusted identity, production firewall/controller, idempotent deployment transactions, boot persistence, **reverse-direction guest isolation**, conntrack cleanup, captive portal, DHCP/DNS, dashboard and payment processing. Ingress-only filtering is not complete network isolation. Do not deploy the generated rule fragments as a production gateway.
+The baseline generator emits nftables text only. It is not a safe deployment tool. Do not run these policies against a live guest network.
 
 ## Build and test
 
@@ -23,11 +23,11 @@ go vet ./...
 test -z "$(gofmt -l .)"
 ```
 
-The privileged network lab is run only on disposable GitHub-hosted runners. See [tests/netns/README.md](tests/netns/README.md) before attempting it in an isolated disposable VM.
+Packet tests are run only on disposable GitHub-hosted runners. See [tests/netns/README.md](tests/netns/README.md).
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md), [docs/phase2.md](docs/phase2.md), and [docs/validation.md](docs/validation.md). Intended hardware is a dedicated Linux gateway, VLAN-capable switch and guest access point. None has been configured by this project.
+See [docs/architecture.md](docs/architecture.md), [docs/phase2.md](docs/phase2.md), and [docs/validation.md](docs/validation.md). Intended hardware includes a Linux gateway, VLAN-capable switch, and guest AP. No real networking has been configured.
 
 ## Licensing
 

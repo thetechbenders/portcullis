@@ -1,6 +1,6 @@
 # Disposable Linux network namespace lab
 
-Four isolated namespaces simulate a guest, a gateway, an upstream endpoint, and a protected LAN using only virtual Ethernet devices and private routes. The script loads nftables rules only in the disposable gateway namespace. It requires root and is intended **only for an ephemeral hosted CI runner or disposable VM**, never Hephaestus or any production host.
+Four isolated namespaces simulate a guest, gateway, upstream endpoint and protected LAN using veth devices and private routes. The script loads nftables policies only inside the disposable gateway namespace. It requires root and is intended **only for a GitHub-hosted ephemeral runner or disposable VM**, never a live gateway.
 
 ## Build
 
@@ -11,19 +11,21 @@ go test -tags netnslab ./internal/enforce
 sudo bash tests/netns/run.sh /tmp/portcullis-policy /tmp/portcullis-lab-policy
 ```
 
-Dependencies: Go 1.26+, nftables, iproute2, iputils-ping, Python 3, root and Linux network namespaces. The GitHub Actions job executes the test on `ubuntu-24.04` with a ten-minute job timeout.
+Dependencies: Go 1.26+, nftables, iproute2, iputils-ping, Python 3, root and Linux network namespaces. Hosted CI uses `ubuntu-24.04` with a ten-minute job limit.
 
-## Tests and evidence
+## Evidence produced
 
-- Pre-policy positive controls for guest-to-gateway IPv4/IPv6 INPUT and guest-to-upstream/protected-LAN forwarding.
-- IPv6 gateway neighbor entry pinned so INPUT filtering cannot inadvertently prevent test packets from reaching the FORWARD hook.
-- The baseline policy must deny guest IPv4/IPv6 INPUT and FORWARD, with an increase in the specific nftables drop counter for each blocked test.
-- The lab-only policy starts with an empty kernel timeout set and authorizes a source-IP test fixture on the isolated WAN path, while guest INPUT, guest-to-LAN and IPv6 remain denied.
-- A TCP connection must first exchange a successful application acknowledgement. Following a set-element deletion, the second message times out, the server must remain alive, the second message must not have been received, and the correct FORWARD drop counter must increase. After restoring the grant, the **same socket** must complete the exchange.
-- A separate short-lived grant expires under kernel set timeouts; attempted forwarding afterwards is denied.
+- Before installing a firewall, prove guest-to-gateway and guest-to-WAN/LAN IPv4/IPv6 routing, plus WAN/LAN-to-guest routing.
+- Pin IPv6 gateway neighbor mapping so loss of neighbor discovery cannot masquerade as a successful FORWARD denial.
+- Apply the baseline, then confirm IPv4/IPv6 guest INPUT and guest FORWARD in **both directions** reach the correct nft drop counter.
+- Apply the same baseline a second time; assert no duplicate rules. Insert intentionally unsafe broad permits *only inside the lab*, prove they bypass the current rules, then atomically reapply the baseline and assert the permit is gone in both directions.
+- Submit an invalid batch and verify the existing deny remains effective.
+- Replace the disposable lab table in a single nft transaction with a build-tagged source-IP timeout-set fixture. Prove its empty set starts closed, controlled guest-to-WAN grants work and unrelated/reverse/IPv6 paths remain denied.
+- Revoke a grant during an existing TCP exchange, verify a receive timeout, server liveness, no second payload receipt and correct drop counter, and prove recovery of the same socket when a test grant returns.
+- Verify a separate short kernel set timeout denies new packets after expiry.
 
-The namespace harness installs two different policies by submitting a single nft transaction deleting the previous lab table and declaring the next. This is a test-only transition, not a production rule-management implementation. Rules are not installed on the host network. The cleanup trap removes all temporary namespaces/processes and prints diagnostic interface/ruleset information on failures.
+All operations occur in temporary namespaces, with trap cleanup and diagnostics on errors.
 
-## Unverified properties
+## Limitations
 
-Reverse direction (LAN/WAN-to-guest), spoofing resistance, bridge and flowtable bypass, production rule idempotency, actual conntrack deletion, service crash/reboot persistence, DHCP/DNS, captive portal, real hardware and client identity all remain unimplemented or untested. No application-level fixture grant is safe to reuse in production.
+The intentionally unsafe test grant is not trusted client identity. This lab does not test physical bridging, AP management, flowtables, boot persistence, conntrack cleanup, production nftables ownership, DHCP/DNS, or the captive portal. A demo table replacement transaction is not authority to install any rule on a non-disposable host.

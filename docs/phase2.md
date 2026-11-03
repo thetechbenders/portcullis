@@ -1,25 +1,30 @@
-# Phase 2: guest ingress deny and disposable packet testing
+# Phase 2: atomic guest isolation policy and disposable packet tests
 
-## Demonstrated properties
+## What is implemented
 
-`RenderDenyBaseline` emits a Go-generated nftables `inet` table fragment that drops packets entering through the named guest interface on INPUT and FORWARD, including IPv4/IPv6 and established flows. It accepts non-guest ingress and is **not a complete bidirectional isolation policy**.
+`RenderDenyBaseline` emits one nftables `inet` batch that defines the owned `portcullis_guard` table, with guest INPUT denied and guest FORWARD denied for **both** `iifname` and `oifname`. This covers IPv4 and IPv6 packet paths in the namespace lab. Default policies are `accept` for unrelated ingress, so this is a **guest-specific isolated path**, not a general host firewall.
 
-The unsafe timed source-IP allow-set fixture is compiled only with Go build tag `netnslab` in the isolated lab command; it uses its own `portcullis_lab` table. Normal policy builds cannot request fixture grants.
+The batch uses `add table`, `delete table`, then a new declaration, all in a **single** `nft -f` transaction. It works whether the owned table was initially absent or present, avoids accumulated duplicate rules or sets, removes deliberately injected stale permits, and does not temporarily expose guest traffic between statements. An intentionally malformed batch is rejected while the existing deny remains active. The generator itself never invokes nft.
 
-On an ephemeral GitHub-hosted Linux runner, the namespace tests establish routing positive controls, then check that guest INPUT and FORWARD denial increments the expected nftables drop counters. The guest's IPv6 gateway neighbor entry is pinned to avoid neighbor discovery being mistaken for a FORWARD drop. The TCP test requires an initially working socket, a firewall drop counter increment and a receive timeout after removing a test element while the server stays alive and receives no second payload, then a successful ACK **on the same socket** after restoring the grant. A short kernel set timeout also removes guest IPv4 forwarding independently of any userspace service.
+The unsafe timed source-IP test grant remains isolated behind Go's `netnslab` build tag in a separate binary and `portcullis_lab` table. It is **not an authentication mechanism**. The lab fixture also allows established reply packets headed toward a granted test address while blocking unsolicited WAN/LAN-to-guest traffic, protected-LAN paths, and IPv6 traffic.
 
-These observations are evidence about this disposable topology only. They do **not** establish production anti-spoofing, conntrack cleanup, IPv6 routing in an arbitrary host firewall, or isolation of traffic headed *towards* guests.
+## Verified in disposable GitHub Actions
 
-## Remaining security gates
+- IPv4/IPv6 guest-to-gateway INPUT, guest-to-WAN/LAN FORWARD, and WAN/LAN-to-guest FORWARD denials, each tied to the expected nftables drop counter.
+- Positive connectivity controls before installing policy, including reverse WAN/LAN-to-guest paths.
+- One-shot atomic policy reapplication on an existing table, no duplicate FORWARD rules, and deletion of injected stale broad permits.
+- Rejected malformed batch leaves the guest deny intact.
+- Test-only temporary source-IP authorization and kernel expiry without a userspace daemon.
+- An already-open TCP exchange is blocked after revocation, with server liveness, drop counters, and subsequent same-socket recovery after test regrant.
 
-1. **Policy convergence and atomicity:** nftables table declarations are not idempotent replacement operations. Reapplying rendered text to an existing table may append rules and retain old permits. The lab switches between different tables with a single nftables transaction, but the production installer must own a safe, atomic, idempotent ruleset update strategy. Never use bare `nft -f` on a live existing table on the assumption it replaces policy.
-2. **Bidirectional filtering:** the current rules match `iifname guest`, not `oifname guest`. WAN or LAN hosts might still send packets *toward* a guest even though replies cannot pass. Design reverse-direction rules and independently test UDP, established TCP, link-local, and other host interface addresses.
-3. **Interface and hook ownership:** a misnamed/renamed guest interface, bridge, VLAN error, flowtable offload, tc/XDP, or conflicting host firewall can bypass this narrow hook. The installer must validate real interface identity/parent, bridge topology and all active packet paths before enabling the guest interface.
-4. **Persistent deny:** the existing host ruleset may be flushed on firewall reload, removing this table. A single boot/reload policy owner must establish and verify the deny *before* guest networking and forwarding become active, including on crash, reload and rollback.
-5. **Trusted client binding:** source IP in the lab is spoofable; real permits must bind to independently observed attachment and address assignment. The portal must remain unprivileged, with narrow authenticated IPC to the enforcer and strict validation.
-6. **Expiry and revocation:** kernel allow-set timeouts must not outlive the lease's remaining lifetime; delete matching conntrack state as well as rule elements; test TCP/UDP flows in both directions under expiration and explicit revocation.
-7. **AP-local networks:** bridge/client isolation and AP-management restrictions cannot be guaranteed by routed nftables INPUT/FORWARD drops.
+These results are limited to the disposable namespace topology. They do **not** establish complete production packet-path control.
 
-## Deployment prohibition
+## Remaining deployment gates
 
-No production installer, persistent ruleset ownership, identity observation, privileged controller, DHCP/DNS or portal exists. No Hephaestus, UniFi or GL.iNet settings have been changed. Never run the privileged namespace script on a host that is not disposable.
+1. **Ruleset ownership and persistence:** A third-party `flush ruleset`, system service reload, boot ordering, or netplan interface rename can remove or bypass the guard. The deployment controller must verify ownership, interface attachment/parent, and hook topology before enabling guest traffic. Do not treat the renderer as a production installer.
+2. **Other paths:** OUTPUT from the local host to guests, bridged forwarding, flowtables/offload, tc/XDP redirection, and AP-local traffic are not covered by this simple `inet` INPUT/FORWARD fixture. Separate policy and testing are required.
+3. **Reliable identity:** Source-IP-only grants are spoofable. The eventual controller must independently attest attachment and address binding, and enforce strict privileged IPC.
+4. **Kernel lifetime and cleanup:** Derive permit timeouts conservatively from current lease authority, revoke live traffic atomically, and delete affected conntrack state. The current TCP evidence does not prove conntrack cleanup.
+5. **Real integration:** DHCP/DNS preauthorization, captive portal, VLAN switch profile, AP management separation, crash/reboot recovery, and physical network safety remain unimplemented.
+
+No Hephaestus, UniFi or Slate changes are authorized or performed.
