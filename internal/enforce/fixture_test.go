@@ -18,6 +18,8 @@ func TestTimedFixturePolicyStartsClosed(t *testing.T) {
 		"flags timeout",
 		"iifname \"guest0\" oifname \"uplink0\" ip saddr @test_allow_v4 counter accept",
 		"iifname \"guest0\" counter drop",
+		"oifname \"guest0\" ip daddr @test_allow_v4 ct state established,related counter accept",
+		"oifname \"guest0\" counter drop",
 	} {
 		if !strings.Contains(rules, item) {
 			t.Errorf("missing %q", item)

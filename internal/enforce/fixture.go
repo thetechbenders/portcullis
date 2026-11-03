@@ -9,6 +9,8 @@ import (
 
 // RenderTimedFixturePolicy is unsafe and exists ONLY for netns packet tests.
 // A source IP is not authenticated identity. It must not ship in normal builds.
+// This separate test table uses a kernel set to demonstrate packet grant and
+// expiry mechanics, NOT the authority model of a production Portcullis.
 func RenderTimedFixturePolicy(guest, uplink string) (string, error) {
 	if !safeInterface.MatchString(guest) {
 		return "", ErrGuestInterface
@@ -29,7 +31,9 @@ func RenderTimedFixturePolicy(guest, uplink string) (string, error) {
         type filter hook forward priority -50; policy accept;
         iifname %q oifname %q ip saddr @test_allow_v4 counter accept
         iifname %q counter drop
+        oifname %q ip daddr @test_allow_v4 ct state established,related counter accept
+        oifname %q counter drop
     }
 }
-`, guest, guest, uplink, guest), nil
+`, guest, guest, uplink, guest, guest, guest), nil
 }

@@ -12,21 +12,27 @@ func TestRenderDenyBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	checks := []string{
+		"add table inet portcullis_guard",
+		"delete table inet portcullis_guard",
 		"table inet portcullis_guard",
 		"type filter hook input priority -50; policy accept;",
 		"type filter hook forward priority -50; policy accept;",
 		"iifname \"opg.3030\" counter drop",
+		"oifname \"opg.3030\" counter drop",
 	}
 	for _, want := range checks {
 		if !strings.Contains(rules, want) {
 			t.Fatalf("missing %q from rules:\n%s", want, rules)
 		}
 	}
-	if strings.Count(rules, "counter drop") != 2 {
-		t.Fatalf("expected exactly 2 guest drops: %s", rules)
+	if strings.Count(rules, "counter drop") != 3 {
+		t.Fatalf("expected exactly 3 deny counters: %s", rules)
 	}
 	if strings.Contains(rules, "ct state established accept") || strings.Contains(rules, "flags owner") {
-		t.Fatal("baseline must not accept established connections or be owner-scoped")
+		t.Fatal("baseline must not permit established connections or be owner-scoped")
+	}
+	if strings.Index(rules, "add table") > strings.Index(rules, "delete table") {
+		t.Fatal("must establish table before delete for first-time installation")
 	}
 }
 
