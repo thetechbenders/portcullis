@@ -1,22 +1,20 @@
 # Validation contract
 
-## Current evidence
+## Available evidence
 
-The Go unit suite covers lease issuance, IDs, input limits, duplicate active client labels, maximum store capacity, expiry boundaries, lookup, revocation, volatile-store semantics and pruning. A concurrent issue/validate/prune/revoke test runs under `go test -race ./...`; `go vet ./...` and repo-wide `gofmt` run in CI.
+`go test ./...`, `go test -race ./...`, `go vet ./...` and repository-wide `gofmt` cover bounded lease records and the inert policy renderer. The build-tagged `netnslab` fixture has separate Go checks and cannot be invoked by the normal policy CLI.
 
-The separate, privileged **GitHub-hosted disposable netns** CI job compiles the policy renderer and creates guest, gateway, upstream, and protected-LAN namespaces. It checks nft syntax and verifies packet paths before and after a deny policy, IPv4 and IPv6 guest denial, IPv4 fixture grants, protected-LAN isolation, kernel set timeouts, and blockage of an established TCP exchange on grant deletion. This is not production client authorization; the timed test rule trusts a source address.
+The GitHub-hosted disposable netns CI job checks nftables syntax, basic packet routing preconditions, and guest IPv4/IPv6 INPUT and FORWARD drops with direction-specific nftables counter deltas. Static IPv6 gateway neighbor mapping avoids neighbor-discovery-only false positives. The test-only source-IP set demonstrates kernel expiry and, for one existing TCP connection, loss of an exchange after revocation with later recovery on the same socket.
 
-See [tests/netns/README.md](../tests/netns/README.md).
+These are **direction-limited lab observations**, not a verified production firewall. A socket being blocked does not prove the conntrack entry was deleted. The fixture source-IP allow-set is deliberately not a trusted client-authentication mechanism.
 
-## Outstanding deployment gates
+## Required for any real deployment
 
-- Verify persistent default-deny INPUT/FORWARD across kernel/firewall startup, daemon crash/restart, reboots and transaction failure.
-- Verify independently observed network identities, source/attachment binding, DHCP reassignment, MAC/IP spoofing and concurrent client sessions.
-- Verify revocation and expiration of **established TCP/UDP** flows and actual conntrack cleanup. An application ACK being blocked alone does not prove conntrack deletion.
-- Validate DHCP/DNS and preauthorization services are interface-scoped and do not allow bypasses (alternate DNS, DoT, IPv6, captive detection, static routes).
-- Verify no guest path to SSH, protected host services, switch/AP management, LAN/VPN/internal networks or other guest devices.
-- Validate controller privilege separation, narrow IPC contracts and atomic allow-set updates.
-- Test failure injection, suspended monotonic clock, stale grants, persistent state reconciliation and rollback handling.
-- Inspect production nftables state, validate physical switch/AP isolation, and establish independent recovery and rollback before live integration.
-
-No hardware or production gateway tests have been run.
+- Bidirectional guest isolation and separate proof of other-host-IP and IPv6 link-local blocking.
+- Safe atomic, idempotent policy updates; no stale permits when policies are replaced, no fail-open gap on reload, crash, shutdown or reboot.
+- Verify actual interface identity/parent, VLAN/bridge arrangements, physical switch/AP isolation and all other active nftables, bridge, flowtable, tc and XDP paths.
+- Reliable authenticated client attachment identity, anti-spoofing, address reassignment and DHCP binding.
+- Bounded kernel allow-set expiry derived from lease duration, true conntrack cleanup, UDP and reverse-direction flow revocation.
+- Least-privilege controller and authenticated narrowly scoped IPC from the portal.
+- Failure-injection tests of boot, reload, external ruleset flush, watchdog response and rollback, before connecting actual guest traffic.
+- No changes to real gateway/network equipment without independent recovery, rollback and explicit deployment authorization.
