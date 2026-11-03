@@ -7,11 +7,12 @@ if (( EUID != 0 )); then
   echo "Must run as root on a disposable test runner" >&2
   exit 2
 fi
-if (( $# != 1 )) || [[ ! -x "$1" ]]; then
-  echo "Usage: sudo bash tests/netns/run.sh /absolute/path/to/portcullis-policy" >&2
+if (( $# != 2 )) || [[ ! -x "$1" ]] || [[ ! -x "$2" ]]; then
+  echo "Usage: sudo bash tests/netns/run.sh /path/to/normal-policy /path/to/netnslab-policy" >&2
   exit 2
 fi
 bin="$1"
+labbin="$2"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 tmp="$(mktemp -d)"
 guest="pcguest$$"
@@ -25,6 +26,12 @@ cleanup() {
   trap - EXIT
   if [[ -n "$client_pid" ]]; then kill "$client_pid" 2>/dev/null || :; wait "$client_pid" 2>/dev/null || :; fi
   if [[ -n "$server_pid" ]]; then kill "$server_pid" 2>/dev/null || :; wait "$server_pid" 2>/dev/null || :; fi
+  if (( status != 0 )); then
+    echo "=== fixture diagnostics ===" >&2
+    ip -n "$gw" addr show >&2 || :
+    ip -n "$guest" -6 neigh show >&2 || :
+    ip netns exec "$gw" nft -a list ruleset >&2 || :
+  fi
   for ns in "$guest" "$gw" "$wan" "$lan"; do
     ip netns del "$ns" 2>/dev/null || :
   done
@@ -45,6 +52,24 @@ expect_block() {
   if timeout 6s "$@" >/dev/null 2>&1; then
     fail "guest bypass: $*"
   fi
+}
+drop_count() {
+  ip netns exec "$gw" nft -j list chain inet "$1" "$2" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)["nftables"]
+print(sum(int(e["counter"]["packets"])
+    for item in data for rule in [item.get("rule", {})]
+    if any("drop" in e for e in rule.get("expr", []))
+    for e in rule.get("expr", []) if "counter" in e))
+'
+}
+expect_drop() {
+  local table="$1" chain="$2" before after
+  shift 2
+  before="$(drop_count "$table" "$chain")"
+  expect_block "$@"
+  after="$(drop_count "$table" "$chain")"
+  (( after > before )) || fail "no packet counted by $table/$chain drop: $* ($before -> $after)"
 }
 wait_for_file() {
   local file="$1"
@@ -94,8 +119,14 @@ ip -n "$lan" -6 route add 2001:db8:203::/64 via 2001:db8:205::1
 # Linux performs IPv6 duplicate-address detection asynchronously. Wait for
 # addresses to leave tentative state before the first routed packet test.
 sleep 3
+# The guest must continue resolving its IPv6 default gateway even when
+# the guest INPUT firewall blocks IPv6 neighbour solicitations.
+gwmac="$(ip netns exec "$gw" cat /sys/class/net/guest0/address)"
+ip -n "$guest" -6 neigh replace 2001:db8:203::1 lladdr "$gwmac" dev eth0 nud permanent
 
 echo "Checking packets can route in the fixture before firewall is installed"
+expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 10.203.0.1
+expect_allow ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:203::1
 expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 10.204.0.2
 expect_allow ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:204::2
@@ -106,23 +137,23 @@ ip netns exec "$gw" nft -c -f "$tmp/baseline.nft"
 ip netns exec "$gw" nft -f "$tmp/baseline.nft"
 
 echo "Checking fail-closed baseline for INPUT, FORWARD, IPv4, IPv6"
-expect_block ip netns exec "$guest" ping -n -c 1 -W 2 10.203.0.1
-expect_block ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
-expect_block ip netns exec "$guest" ping -n -c 1 -W 2 10.204.0.2
-expect_block ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:203::1
-expect_block ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:204::2
-expect_block ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:205::2
+expect_drop portcullis_guard guest_input ip netns exec "$guest" ping -n -c 1 -W 2 10.203.0.1
+expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 10.204.0.2
+expect_drop portcullis_guard guest_input ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:203::1
+expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:204::2
+expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:205::2
 # Other ingress should not be collateral damage.
 expect_allow ip netns exec "$wan" ping -n -c 1 -W 2 198.18.0.1
 
 # Replace the policy ONLY in this throwaway namespace. Never use this test
 # source-IP fixture as a production identity/authorization mechanism.
-ip netns exec "$gw" nft delete table inet portcullis_guard
-"$bin" -guest guest0 -uplink uplink0 -test-fixture-timed-allow > "$tmp/timed.nft"
-ip netns exec "$gw" nft -c -f "$tmp/timed.nft"
-ip netns exec "$gw" nft -f "$tmp/timed.nft"
+"$labbin" -guest guest0 -uplink uplink0 > "$tmp/timed.nft"
+{ echo 'delete table inet portcullis_guard'; cat "$tmp/timed.nft"; } > "$tmp/switch.nft"
+ip netns exec "$gw" nft -c -f "$tmp/switch.nft"
+ip netns exec "$gw" nft -f "$tmp/switch.nft"
 expect_block ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
-printf 'add element inet portcullis_guard test_allow_v4 { 10.203.0.2 timeout 12s }\n' > "$tmp/allow.nft"
+printf 'add element inet portcullis_lab test_allow_v4 { 10.203.0.2 timeout 60s }\n' > "$tmp/allow.nft"
 ip netns exec "$gw" nft -f "$tmp/allow.nft"
 expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 expect_block ip netns exec "$guest" ping -n -c 1 -W 2 10.204.0.2
@@ -138,7 +169,7 @@ wait_for_file "$tmp/server.ready"
 ip netns exec "$guest" python3 "$root/tests/netns/tcp_fixture.py" client --ready "$tmp/client.ready" --trigger "$tmp/revoke.now" --result "$tmp/client.result" &
 client_pid="$!"
 wait_for_file "$tmp/client.ready"
-printf 'delete element inet portcullis_guard test_allow_v4 { 10.203.0.2 }\n' > "$tmp/revoke.nft"
+printf 'delete element inet portcullis_lab test_allow_v4 { 10.203.0.2 }\n' > "$tmp/revoke.nft"
 ip netns exec "$gw" nft -f "$tmp/revoke.nft"
 touch "$tmp/revoke.now"
 wait "$client_pid" || fail "TCP revocation client failed"
@@ -147,7 +178,7 @@ client_pid=""
 expect_block ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 
 echo "Checking kernel timeout expires a grant without any userspace daemon"
-printf 'add element inet portcullis_guard test_allow_v4 { 10.203.0.2 timeout 3s }\n' > "$tmp/short.nft"
+printf 'add element inet portcullis_lab test_allow_v4 { 10.203.0.2 timeout 3s }\n' > "$tmp/short.nft"
 ip netns exec "$gw" nft -f "$tmp/short.nft"
 expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 sleep 4
