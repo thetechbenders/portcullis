@@ -131,6 +131,11 @@ expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 10.204.0.2
 expect_allow ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:204::2
 expect_allow ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:205::2
+# Reverse-direction preconditions must succeed without nft filtering.
+expect_allow ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
+expect_allow ip netns exec "$lan" ping -n -c 1 -W 2 10.203.0.2
+expect_allow ip netns exec "$wan" ping -6 -n -c 1 -W 2 2001:db8:203::2
+expect_allow ip netns exec "$lan" ping -6 -n -c 1 -W 2 2001:db8:203::2
 
 "$bin" -guest guest0 > "$tmp/baseline.nft"
 ip netns exec "$gw" nft -c -f "$tmp/baseline.nft"
@@ -143,10 +148,35 @@ expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -n -c 1 -
 expect_drop portcullis_guard guest_input ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:203::1
 expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:204::2
 expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:205::2
+echo "Checking reverse traffic is dropped at the gateway FORWARD hook"
+expect_drop portcullis_guard guest_forward ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
+expect_drop portcullis_guard guest_forward ip netns exec "$lan" ping -n -c 1 -W 2 10.203.0.2
+expect_drop portcullis_guard guest_forward ip netns exec "$wan" ping -6 -n -c 1 -W 2 2001:db8:203::2
+expect_drop portcullis_guard guest_forward ip netns exec "$lan" ping -6 -n -c 1 -W 2 2001:db8:203::2
 # Other ingress should not be collateral damage.
 expect_allow ip netns exec "$wan" ping -n -c 1 -W 2 198.18.0.1
 
-# Replace the policy ONLY in this throwaway namespace. Never use this test
+echo "Checking atomic policy convergence with existing rules and stale permits"
+# Reapplying must not append duplicate chains or rules.
+ip netns exec "$gw" nft -c -f "$tmp/baseline.nft"
+ip netns exec "$gw" nft -f "$tmp/baseline.nft"
+forward_rules="$(ip netns exec "$gw" nft -j list chain inet portcullis_guard guest_forward | python3 -c 'import json,sys; print(sum("rule" in e for e in json.load(sys.stdin)["nftables"]))')"
+[[ "$forward_rules" -eq 2 ]] || fail "reapply accumulated rules (forward count=$forward_rules)"
+# Simulate stale broad permits in the owned table on this THROWAWAY lab.
+# A guest ping must work with the deliberate bad rule, proving the test's
+# stale-permit injection is capable of bypassing the baseline.
+ip netns exec "$gw" nft insert rule inet portcullis_guard guest_forward iifname guest0 oifname uplink0 counter accept
+ip netns exec "$gw" nft insert rule inet portcullis_guard guest_forward oifname guest0 counter accept
+expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+# One nft -f invocation must remove both bad permits without a gap.
+ip netns exec "$gw" nft -c -f "$tmp/baseline.nft"
+ip netns exec "$gw" nft -f "$tmp/baseline.nft"
+expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+expect_drop portcullis_guard guest_forward ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
+forward_rules="$(ip netns exec "$gw" nft -j list chain inet portcullis_guard guest_forward | python3 -c 'import json,sys; print(sum("rule" in e for e in json.load(sys.stdin)["nftables"]))')"
+[[ "$forward_rules" -eq 2 ]] || fail "stale rules survived atomic replacement"
+
+# Switch the policy ONLY in this throwaway namespace. Never use the test
 # source-IP fixture as a production identity/authorization mechanism.
 "$labbin" -guest guest0 -uplink uplink0 > "$tmp/timed.nft"
 { echo 'delete table inet portcullis_guard'; cat "$tmp/timed.nft"; } > "$tmp/switch.nft"
@@ -157,6 +187,11 @@ printf 'add element inet portcullis_lab test_allow_v4 { 10.203.0.2 timeout 60s }
 ip netns exec "$gw" nft -f "$tmp/allow.nft"
 expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 expect_drop portcullis_lab guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 10.204.0.2
+# A permitted guest's return packets work only for established flows.
+# Unsolicited reverse traffic and all IPv6 still hit the drop rule.
+expect_drop portcullis_lab guest_forward ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
+expect_drop portcullis_lab guest_forward ip netns exec "$lan" ping -n -c 1 -W 2 10.203.0.2
+expect_drop portcullis_lab guest_forward ip netns exec "$wan" ping -6 -n -c 1 -W 2 2001:db8:203::2
 expect_drop portcullis_lab guest_input ip netns exec "$guest" ping -n -c 1 -W 2 10.203.0.1
 expect_drop portcullis_lab guest_forward ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:204::2
 ip -n "$guest" addr add 10.203.0.3/24 dev eth0
