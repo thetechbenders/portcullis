@@ -91,6 +91,10 @@ ip -n "$wan" -6 route add 2001:db8:203::/64 via 2001:db8:204::1
 ip -n "$lan" route add 10.203.0.0/24 via 10.204.0.1
 ip -n "$lan" -6 route add 2001:db8:203::/64 via 2001:db8:205::1
 
+# Linux performs IPv6 duplicate-address detection asynchronously. Wait for
+# addresses to leave tentative state before the first routed packet test.
+sleep 3
+
 echo "Checking packets can route in the fixture before firewall is installed"
 expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 10.204.0.2
