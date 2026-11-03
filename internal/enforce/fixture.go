@@ -1,21 +1,22 @@
+//go:build netnslab
+
 package enforce
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
-// RenderTimedFixturePolicy is an explicitly UNSAFE, test-only policy. It
-// authorizes IPv4 based solely on a source address and therefore does not
-// establish identity or security against spoofing. NEVER deploy this policy
-// on a guest network. The real enforcement design needs verified attachment
-// identity, anti-spoofing and an independently persistent deny baseline.
-//
-// A kernel timeout set permits only guest -> fixture uplink traffic, while
-// guest INPUT, guest -> protected LAN, and all guest IPv6 remain denied.
-// The set begins EMPTY and is mutated only by the namespace test harness.
+// RenderTimedFixturePolicy is unsafe and exists ONLY for netns packet tests.
+// A source IP is not authenticated identity. It must not ship in normal builds.
 func RenderTimedFixturePolicy(guest, uplink string) (string, error) {
-	if !safeInterface.MatchString(guest) || !safeInterface.MatchString(uplink) || guest == uplink {
+	if !safeInterface.MatchString(guest) {
 		return "", ErrGuestInterface
 	}
-	return fmt.Sprintf(`table inet portcullis_guard {
+	if !safeInterface.MatchString(uplink) || uplink == guest {
+		return "", errors.New("fixture uplink must be a distinct valid interface")
+	}
+	return fmt.Sprintf(`table inet portcullis_lab {
     set test_allow_v4 {
         type ipv4_addr
         flags timeout

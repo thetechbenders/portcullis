@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Disposable namespace test TCP echo fixture, not a network-facing service."""
+"""TCP probe proving blocked delivery and same-socket recovery in disposable netns."""
 import argparse
 import pathlib
 import socket
@@ -10,44 +10,53 @@ def mark(path, value):
     pathlib.Path(path).write_text(value, encoding="ascii")
 
 
+def await_file(path, seconds=15):
+    deadline = time.monotonic() + seconds
+    while not pathlib.Path(path).exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError("missing synchronization marker: " + path)
+        time.sleep(0.02)
+
+
 def server(args):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(("198.18.0.2", 18888))
-        sock.listen(1)
-        mark(args.ready, "ready")
-        conn, _ = sock.accept()
-        with conn:
-            conn.settimeout(12)
-            while True:
-                try:
-                    payload = conn.recv(4)
-                except (socket.timeout, ConnectionError):
-                    return
-                if not payload:
-                    return
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(("198.18.0.2", 18888))
+        listener.listen(1)
+        listener.settimeout(15)
+        mark(args.ready, "listening")
+        with listener.accept()[0] as conn:
+            conn.settimeout(30)
+            # Precisely two 4-byte messages on one connection.
+            for index in (1, 2):
+                data = conn.recv(4)
+                if data != b"PING":
+                    raise RuntimeError("unexpected payload on server: " + repr(data))
+                mark(args.ready + "." + str(index), "received")
                 conn.sendall(b"ACK!")
 
 
 def client(args):
-    with socket.create_connection(("198.18.0.2", 18888), timeout=4) as sock:
-        sock.settimeout(3)
+    with socket.create_connection(("198.18.0.2", 18888), timeout=5) as sock:
+        sock.settimeout(5)
         sock.sendall(b"PING")
         if sock.recv(4) != b"ACK!":
-            raise RuntimeError("initial TCP handshake failed")
+            raise RuntimeError("initial echo failed")
         mark(args.ready, "connected")
-        end = time.monotonic() + 12
-        while not pathlib.Path(args.trigger).exists():
-            if time.monotonic() >= end:
-                raise TimeoutError("revocation trigger never arrived")
-            time.sleep(0.05)
+        await_file(args.trigger)
+        sock.sendall(b"PING")
+        sock.settimeout(2)
         try:
-            sock.sendall(b"PING")
             response = sock.recv(4)
-        except (socket.timeout, ConnectionError, OSError):
-            mark(args.result, "blocked")
-            return
-        mark(args.result, "bypass" if response == b"ACK!" else "blocked")
+        except socket.timeout:
+            mark(args.result, "timeout")
+        else:
+            raise RuntimeError("post-revocation read did not time out: " + repr(response))
+        await_file(args.resume)
+        sock.settimeout(12)
+        if sock.recv(4) != b"ACK!":
+            raise RuntimeError("same-socket recovery did not receive ACK")
+        mark(args.result, "recovered")
 
 
 def main():
@@ -56,12 +65,13 @@ def main():
     parser.add_argument("--ready", required=True)
     parser.add_argument("--trigger")
     parser.add_argument("--result")
+    parser.add_argument("--resume")
     args = parser.parse_args()
     if args.mode == "server":
         server(args)
     else:
-        if not args.trigger or not args.result:
-            parser.error("client requires --trigger and --result")
+        if not args.trigger or not args.result or not args.resume:
+            parser.error("client requires trigger, result, and resume")
         client(args)
 
 

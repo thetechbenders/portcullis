@@ -1,5 +1,5 @@
-// Command portcullis-policy emits nftables text only; it never executes nft.
-// --test-fixture-timed-allow is exclusively for disposable network namespaces.
+// Command portcullis-policy emits inert nftables rules text.
+// It never executes nftables or grants guest network access.
 package main
 
 import (
@@ -12,26 +12,18 @@ import (
 
 func main() {
 	guest := flag.String("guest", "", "gateway guest interface")
-	uplink := flag.String("uplink", "", "fixture uplink interface")
-	fixture := flag.Bool("test-fixture-timed-allow", false, "UNSAFE test-only source-IP authorization fixture")
 	flag.Parse()
-
-	var (
-		rules string
-		err   error
-	)
-	if *fixture {
-		rules, err = enforce.RenderTimedFixturePolicy(*guest, *uplink)
-	} else {
-		if *uplink != "" {
-			fmt.Fprintln(os.Stderr, "-uplink requires -test-fixture-timed-allow")
-			os.Exit(2)
-		}
-		rules, err = enforce.RenderDenyBaseline(*guest)
+	if flag.NArg() != 0 {
+		fmt.Fprintln(os.Stderr, "unexpected positional arguments")
+		os.Exit(2)
 	}
+	rules, err := enforce.RenderDenyBaseline(*guest)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	fmt.Print(rules)
+	if _, err := fmt.Print(rules); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }

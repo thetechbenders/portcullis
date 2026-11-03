@@ -1,3 +1,5 @@
+//go:build netnslab
+
 package enforce
 
 import (
@@ -12,6 +14,7 @@ func TestTimedFixturePolicyStartsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, item := range []string{
+		"table inet portcullis_lab",
 		"flags timeout",
 		"iifname \"guest0\" oifname \"uplink0\" ip saddr @test_allow_v4 counter accept",
 		"iifname \"guest0\" counter drop",
@@ -31,7 +34,7 @@ func TestTimedFixtureRejectsInterfaces(t *testing.T) {
 		{"guest0", "wan0;flush"}, {"bad interface", "wan0"},
 	} {
 		rules, err := RenderTimedFixturePolicy(tc[0], tc[1])
-		if !errors.Is(err, ErrGuestInterface) || rules != "" {
+		if !errors.Is(err, ErrGuestInterface) && err == nil || rules != "" {
 			t.Fatalf("guest=%q uplink=%q rules=%q err=%v", tc[0], tc[1], rules, err)
 		}
 	}
