@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -26,7 +26,8 @@ jobs:
       - name: Script syntax
         run: bash -n tests/netns/run.sh && python3 -m py_compile tests/netns/tcp_fixture.py
   netns:
-    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -36,7 +37,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq nftables iproute2 iputils-ping
-      - name: Compile policy renderer
-        run: go build -o "${{ runner.temp }}/portcullis-policy" ./cmd/portcullis-policy
+      - name: Compile policy renderers
+        run: |
+          go build -o "${{ runner.temp }}/portcullis-policy" ./cmd/portcullis-policy
+          go build -tags netnslab -o "${{ runner.temp }}/portcullis-netnslab-policy" ./tests/netns/policy
+          go test -tags netnslab ./internal/enforce
       - name: Namespace packet integration tests
-        run: sudo bash tests/netns/run.sh "${{ runner.temp }}/portcullis-policy"
+        run: sudo bash tests/netns/run.sh "${{ runner.temp }}/portcullis-policy" "${{ runner.temp }}/portcullis-netnslab-policy"
