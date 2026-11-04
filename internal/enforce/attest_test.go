@@ -47,7 +47,10 @@ func TestVerifyDenyGuardJSON(t *testing.T) {
 
 func TestVerifyDenyGuardRejectsMutations(t *testing.T) {
 	tests := map[string]func([]any) []any{
-		"dormant": func(x []any) []any { x[1].(map[string]any)["table"].(map[string]any)["flags"] = []any{"dormant"}; return x },
+		"dormant": func(x []any) []any {
+			x[1].(map[string]any)["table"].(map[string]any)["flags"] = []any{"dormant"}
+			return x
+		},
 		"unhooked": func(x []any) []any { delete(x[2].(map[string]any)["chain"].(map[string]any), "hook"); return x },
 		"wrong hook": func(x []any) []any { x[3].(map[string]any)["chain"].(map[string]any)["hook"] = "output"; return x },
 		"wrong priority": func(x []any) []any { x[3].(map[string]any)["chain"].(map[string]any)["prio"] = 0; return x },
@@ -77,7 +80,9 @@ func TestVerifyDenyGuardRejectsMutations(t *testing.T) {
 			f := fixtureListing()
 			f["nftables"] = mutate(f["nftables"].([]any))
 			raw, err := json.Marshal(f)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := VerifyDenyGuardJSON(raw, "guest0"); !errors.Is(err, ErrGuardAttestation) {
 				t.Fatalf("unsafe nft state accepted: %v", err)
 			}

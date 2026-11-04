@@ -67,16 +67,16 @@ func VerifyDenyGuardJSON(data []byte, guest string) error {
 				continue
 			}
 			var o struct {
-				Family  string          `json:"family"`
-				Table   string          `json:"table"`
-				Name    string          `json:"name"`
-				Chain   string          `json:"chain"`
-				Type    string          `json:"type"`
-				Hook    string          `json:"hook"`
-				Prio    json.RawMessage `json:"prio"`
-				Policy  string          `json:"policy"`
-				Flags   []string        `json:"flags"`
-				Comment string          `json:"comment"`
+				Family  string           `json:"family"`
+				Table   string           `json:"table"`
+				Name    string           `json:"name"`
+				Chain   string           `json:"chain"`
+				Type    string           `json:"type"`
+				Hook    string           `json:"hook"`
+				Prio    json.RawMessage  `json:"prio"`
+				Policy  string           `json:"policy"`
+				Flags   []string         `json:"flags"`
+				Comment string           `json:"comment"`
 				Expr    []map[string]any `json:"expr"`
 			}
 			if err := json.Unmarshal(payload, &o); err != nil {
@@ -117,8 +117,8 @@ func VerifyDenyGuardJSON(data []byte, guest string) error {
 				}
 				wantMatch := map[string]any{
 					"match": map[string]any{
-						"op": "==",
-						"left": map[string]any{"meta": map[string]any{"key": exp.key}},
+						"op":    "==",
+						"left":  map[string]any{"meta": map[string]any{"key": exp.key}},
 						"right": exp.iface,
 					},
 				}
