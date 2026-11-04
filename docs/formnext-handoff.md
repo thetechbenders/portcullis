@@ -1,5 +1,8 @@
 # Formnext vertical slice: handoff for review and commit
 
+> Historical incoming handoff from Claude. For the subsequent committed integration,
+> corrections and validation, read [formnext-integration.md](formnext-integration.md).
+
 Session date 2026-11-04. Nothing has been committed or pushed; all work is uncommitted
 working-tree changes on local branch `feat/formnext-vertical-slice`.
 
