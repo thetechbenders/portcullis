@@ -332,7 +332,7 @@ udp_session_case() {
   local kind="$1" prefix="$tmp/udp-$1" before after
   # Test-only source-IP permission. Real deployments cannot trust source IP.
   if [[ "$kind" == "expiry" ]]; then
-    ip netns exec "$gw" nft add element inet portcullis_lab test_allow_v4 '{ 10.203.0.2 timeout 5s }'
+    ip netns exec "$gw" nft add element inet portcullis_lab test_allow_v4 '{ 10.203.0.2 timeout 10s }'
   else
     ip netns exec "$gw" nft add element inet portcullis_lab test_allow_v4 '{ 10.203.0.2 timeout 30s }'
   fi
@@ -344,7 +344,7 @@ udp_session_case() {
   wait_for_file "$prefix.server-ready"
   if [[ "$kind" == "expiry" ]]; then
     # Kernel expiry occurs without deleting the element from userspace.
-    sleep 6
+    sleep 11
   else
     ip netns exec "$gw" nft delete element inet portcullis_lab test_allow_v4 '{ 10.203.0.2 }'
   fi

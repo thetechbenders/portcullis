@@ -72,6 +72,12 @@ def main():
     parser.add_argument("role", choices=["server", "client"])
     parser.add_argument("prefix")
     args = parser.parse_args()
+    # Use distinct 4-tuples across cases. This avoids a previous UDP flow's
+    # conntrack state contaminating the next case's authorized handshake.
+    global WAN, GUEST
+    offset = 10 if args.prefix.endswith("expiry") else 0
+    WAN = (WAN[0], WAN[1] + offset)
+    GUEST = (GUEST[0], GUEST[1] + offset)
     if args.role == "server":
         server(args.prefix)
     else:
