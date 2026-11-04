@@ -76,7 +76,10 @@ func (k *Kernel) checkTopology(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%w: guest IPv6 state: %v", kernel.ErrTopology, err)
 	}
-	return kernel.CheckGuestLink(guest, uplink, disabled)
+	if err := kernel.CheckGuestLink(guest, uplink, disabled); err != nil {
+		return err
+	}
+	return k.Link.CheckNoUpperLinks(ctx, k.Guard.Guest, k.Guard.Uplink)
 }
 
 func (k *Kernel) apply(ctx context.Context, batch string, err error) error {

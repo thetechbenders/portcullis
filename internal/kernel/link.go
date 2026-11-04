@@ -223,3 +223,81 @@ func nonEmptyField(obj map[string]json.RawMessage, key string, v *string) error 
 	}
 	return nil
 }
+
+// CheckNoUpperLinks enumerates the caller's netns, rejecting devices stacked
+// on either guarded interface. Such devices change the packet's iifname.
+// A veth peer in another namespace is not an upper device.
+func (l *Link) CheckNoUpperLinks(ctx context.Context, guest, uplink string) error {
+	out, err := l.exec().Run(ctx, nil, "-j", "-d", "link", "show")
+	if err != nil {
+		return err
+	}
+	return verifyNoUpperLinks(out, guest, uplink)
+}
+
+func verifyNoUpperLinks(data []byte, guest, uplink string) error {
+	if len(data) == 0 || len(data) > maxLinkJSON {
+		return ErrLinkJSON
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	if err := expectDelim(dec, '['); err != nil {
+		return err
+	}
+	var objects []map[string]json.RawMessage
+	indexes := map[int]string{}
+	names := map[string]bool{}
+	for dec.More() {
+		obj, err := decodeObject(dec)
+		if err != nil {
+			return err
+		}
+		var name string
+		if err := field(obj, "ifname", '"', true, &name); err != nil {
+			return err
+		}
+		var index int
+		if err := json.Unmarshal(obj["ifindex"], &index); err != nil || index <= 0 || names[name] || indexes[index] != "" {
+			return ErrLinkJSON
+		}
+		names[name] = true
+		indexes[index] = name
+		objects = append(objects, obj)
+	}
+	if err := expectDelim(dec, ']'); err != nil {
+		return err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return ErrLinkJSON
+	}
+	if !names[guest] || !names[uplink] {
+		return ErrLinkJSON
+	}
+	for _, obj := range objects {
+		// iproute2 reports link_index for stacked links and veth peers. A
+		// link_netnsid makes that index explicitly relative to another netns.
+		if remote, ok := obj["link_netnsid"]; ok {
+			var id int
+			if json.Unmarshal(remote, &id) != nil || id < 0 {
+				return ErrLinkJSON
+			}
+			continue
+		}
+		var lower string
+		if err := field(obj, "link", '"', false, &lower); err != nil {
+			return err
+		}
+		if raw, ok := obj["link_index"]; ok {
+			var index int
+			if json.Unmarshal(raw, &index) != nil || index <= 0 {
+				return ErrLinkJSON
+			}
+			if name := indexes[index]; name == guest || name == uplink {
+				return fmt.Errorf("%w: upper device on %s", ErrTopology, name)
+			}
+		}
+		if lower == guest || lower == uplink {
+			return fmt.Errorf("%w: upper device on %s", ErrTopology, lower)
+		}
+	}
+	return nil
+}
