@@ -269,11 +269,18 @@ expect_drop portcullis_guard guest_forward guest-egress ip netns exec "$guest" p
 expect_drop portcullis_guard guest_forward guest-ingress ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
 forward_rules="$(ip netns exec "$gw" nft -j list chain inet portcullis_guard guest_forward | python3 -c 'import json,sys; print(sum("rule" in e for e in json.load(sys.stdin)["nftables"]))')"
 [[ "$forward_rules" -eq 2 ]] || fail "stale rules survived atomic replacement"
-# A broken transaction must reject the whole batch and preserve the deny.
+# A kernel-side failure must roll back a staged flush, not just leave a
+# fresh deny in place. Put a unique sentinel inside the current ruleset.
+ip netns exec "$gw" nft insert rule inet portcullis_guard guest_forward iifname guest0 counter drop comment "rollback-sentinel"
+ip netns exec "$gw" nft -j list chain inet portcullis_guard guest_forward | grep -q '"rollback-sentinel"' || fail "rollback sentinel not installed"
 { cat "$tmp/reconcile.nft"; echo 'create chain inet portcullis_guard guest_forward'; } > "$tmp/invalid.nft"
 if ip netns exec "$gw" nft -f "$tmp/invalid.nft" >/dev/null 2>&1; then
-  fail "invalid firewall transaction was accepted"
+  fail "kernel-conflicting firewall transaction was accepted"
 fi
+# If the safe prefix were partially committed, its flush would remove this
+# sentinel. Require exact old state retention before restoring clean rules.
+ip netns exec "$gw" nft -j list chain inet portcullis_guard guest_forward | grep -q '"rollback-sentinel"' || fail "kernel failure partially committed the flush"
+ip netns exec "$gw" nft -f "$tmp/reconcile.nft"
 expect_drop portcullis_guard guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 expect_drop portcullis_guard guest_forward guest-ingress ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
 
