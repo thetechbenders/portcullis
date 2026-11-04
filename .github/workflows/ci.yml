@@ -42,7 +42,8 @@ jobs:
       - name: Compile policy renderers
         run: |
           go build -o "${{ runner.temp }}/portcullis-policy" ./cmd/portcullis-policy
+          go build -o "${{ runner.temp }}/portcullis-verify" ./cmd/portcullis-verify
           go build -tags netnslab -o "${{ runner.temp }}/portcullis-netnslab-policy" ./tests/netns/policy
           go test -tags netnslab ./internal/enforce
       - name: Namespace packet integration tests
-        run: sudo bash tests/netns/run.sh "${{ runner.temp }}/portcullis-policy" "${{ runner.temp }}/portcullis-netnslab-policy"
+        run: sudo bash tests/netns/run.sh "${{ runner.temp }}/portcullis-policy" "${{ runner.temp }}/portcullis-netnslab-policy" "${{ runner.temp }}/portcullis-verify"
