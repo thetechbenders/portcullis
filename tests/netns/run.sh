@@ -21,11 +21,15 @@ wan="pcwan$$"
 lan="pclan$$"
 server_pid=""
 client_pid=""
+udp_server_pid=""
+udp_client_pid=""
 cleanup() {
   local status=$?
   trap - EXIT
   if [[ -n "$client_pid" ]]; then kill "$client_pid" 2>/dev/null || :; wait "$client_pid" 2>/dev/null || :; fi
   if [[ -n "$server_pid" ]]; then kill "$server_pid" 2>/dev/null || :; wait "$server_pid" 2>/dev/null || :; fi
+  if [[ -n "$udp_server_pid" ]]; then kill "$udp_server_pid" 2>/dev/null || :; wait "$udp_server_pid" 2>/dev/null || :; fi
+  if [[ -n "$udp_client_pid" ]]; then kill "$udp_client_pid" 2>/dev/null || :; wait "$udp_client_pid" 2>/dev/null || :; fi
   if (( status != 0 )); then
     echo "=== fixture diagnostics ===" >&2
     ip -n "$gw" addr show >&2 || :
@@ -164,6 +168,12 @@ expect_allow ip netns exec "$wan" ping -6 -n -c 1 -W 2 2001:db8:203::2
 expect_allow ip netns exec "$lan" ping -6 -n -c 1 -W 2 2001:db8:203::2
 
 "$bin" -guest guest0 > "$tmp/baseline.nft"
+"$bin" -guest guest0 -reconcile > "$tmp/reconcile.nft"
+# In-place reconciliation must refuse missing base chains. Bootstrapping is
+# separate and must happen before a guest is ever connected.
+if ip netns exec "$gw" nft -f "$tmp/reconcile.nft" >/dev/null 2>&1; then
+  fail "reconciler unexpectedly installed missing base chains"
+fi
 ip netns exec "$gw" nft -c -f "$tmp/baseline.nft"
 ip netns exec "$gw" nft -f "$tmp/baseline.nft"
 
@@ -204,6 +214,19 @@ ip netns exec "$gw" nft -f "$tmp/baseline.nft"
 # Other ingress should not be collateral damage.
 expect_allow ip netns exec "$wan" ping -n -c 1 -W 2 198.18.0.1
 
+echo "Checking in-place reconciliation without base-chain replacement"
+# A successful repeated reconcile must preserve base-chain handles and never
+# leave duplicate rules. The old whole-table bootstrap remains lab-only.
+ip netns exec "$gw" nft -c -f "$tmp/reconcile.nft"
+ip netns exec "$gw" nft -f "$tmp/reconcile.nft"
+input_handle_before="$(ip netns exec "$gw" nft -a list chain inet portcullis_guard guest_input | head -n 2)"
+forward_handle_before="$(ip netns exec "$gw" nft -a list chain inet portcullis_guard guest_forward | head -n 2)"
+for iteration in {1..30}; do ip netns exec "$gw" nft -f "$tmp/reconcile.nft"; done
+[[ "$(ip netns exec "$gw" nft -a list chain inet portcullis_guard guest_input | head -n 2)" == "$input_handle_before" ]] || fail "input base chain replaced during reconcile"
+[[ "$(ip netns exec "$gw" nft -a list chain inet portcullis_guard guest_forward | head -n 2)" == "$forward_handle_before" ]] || fail "forward base chain replaced during reconcile"
+expect_drop portcullis_guard guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+expect_drop portcullis_guard guest_forward guest-ingress ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
+
 echo "Checking atomic policy convergence with existing rules and stale permits"
 # Reapplying must not append duplicate chains or rules.
 ip netns exec "$gw" nft -c -f "$tmp/baseline.nft"
@@ -217,14 +240,14 @@ ip netns exec "$gw" nft insert rule inet portcullis_guard guest_forward iifname 
 ip netns exec "$gw" nft insert rule inet portcullis_guard guest_forward oifname guest0 counter accept
 expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 # One nft -f invocation must remove both bad permits without a gap.
-ip netns exec "$gw" nft -c -f "$tmp/baseline.nft"
-ip netns exec "$gw" nft -f "$tmp/baseline.nft"
+ip netns exec "$gw" nft -c -f "$tmp/reconcile.nft"
+ip netns exec "$gw" nft -f "$tmp/reconcile.nft"
 expect_drop portcullis_guard guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 expect_drop portcullis_guard guest_forward guest-ingress ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
 forward_rules="$(ip netns exec "$gw" nft -j list chain inet portcullis_guard guest_forward | python3 -c 'import json,sys; print(sum("rule" in e for e in json.load(sys.stdin)["nftables"]))')"
 [[ "$forward_rules" -eq 2 ]] || fail "stale rules survived atomic replacement"
 # A broken transaction must reject the whole batch and preserve the deny.
-{ cat "$tmp/baseline.nft"; echo 'create table inet portcullis_guard'; } > "$tmp/invalid.nft"
+{ cat "$tmp/reconcile.nft"; echo 'create chain inet portcullis_guard guest_forward'; } > "$tmp/invalid.nft"
 if ip netns exec "$gw" nft -f "$tmp/invalid.nft" >/dev/null 2>&1; then
   fail "invalid firewall transaction was accepted"
 fi
@@ -280,6 +303,48 @@ client_pid=""
 [[ -f "$tmp/server.ready.2" ]] || fail "server never received the restored payload"
 ip netns exec "$gw" nft -f "$tmp/revoke.nft"
 expect_drop portcullis_lab guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+
+echo "Checking inbound UDP on an established flow after revoke and expiry"
+udp_session_case() {
+  local kind="$1" prefix="$tmp/udp-$1" before after
+  # Test-only source-IP permission. Real deployments cannot trust source IP.
+  if [[ "$kind" == "expiry" ]]; then
+    ip netns exec "$gw" nft add element inet portcullis_lab test_allow_v4 '{ 10.203.0.2 timeout 5s }'
+  else
+    ip netns exec "$gw" nft add element inet portcullis_lab test_allow_v4 '{ 10.203.0.2 timeout 30s }'
+  fi
+  ip netns exec "$wan" python3 "$root/tests/netns/udp_session.py" server "$prefix" &
+  udp_server_pid="$!"
+  ip netns exec "$guest" python3 "$root/tests/netns/udp_session.py" client "$prefix" &
+  udp_client_pid="$!"
+  wait_for_file "$prefix.client-ready"
+  wait_for_file "$prefix.server-ready"
+  if [[ "$kind" == "expiry" ]]; then
+    # Kernel expiry occurs without deleting the element from userspace.
+    sleep 6
+  else
+    ip netns exec "$gw" nft delete element inet portcullis_lab test_allow_v4 '{ 10.203.0.2 }'
+  fi
+  before="$(drop_count portcullis_lab guest_forward guest-ingress)"
+  touch "$prefix.trigger"
+  wait_for_file "$prefix.sent"
+  wait_for_file "$prefix.blocked"
+  kill -0 "$udp_server_pid" || fail "UDP server died during $kind"
+  after="$(drop_count portcullis_lab guest_forward guest-ingress)"
+  (( after > before )) || fail "inbound UDP was not dropped after $kind"
+  # The tracked UDP session remains alive, so a genuine drop must recover
+  # on exactly the same guest socket if authorization is restored.
+  ip netns exec "$gw" nft add element inet portcullis_lab test_allow_v4 '{ 10.203.0.2 timeout 20s }'
+  touch "$prefix.resume"
+  wait_for_file "$prefix.recovered"
+  wait "$udp_client_pid" || fail "UDP client failed to recover after $kind"
+  udp_client_pid=""
+  wait "$udp_server_pid" || fail "UDP server failed after $kind"
+  udp_server_pid=""
+  ip netns exec "$gw" nft delete element inet portcullis_lab test_allow_v4 '{ 10.203.0.2 }'
+}
+udp_session_case revoke
+udp_session_case expiry
 
 echo "Checking kernel timeout expires a grant without any userspace daemon"
 printf 'add element inet portcullis_lab test_allow_v4 { 10.203.0.2 timeout 3s }\n' > "$tmp/short.nft"
