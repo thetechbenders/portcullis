@@ -338,6 +338,8 @@ udp_session_case() {
   fi
   ip netns exec "$wan" python3 "$root/tests/netns/udp_session.py" server "$prefix" &
   udp_server_pid="$!"
+  wait_for_file "$prefix.bound"
+  kill -0 "$udp_server_pid" || fail "UDP server exited before client startup"
   ip netns exec "$guest" python3 "$root/tests/netns/udp_session.py" client "$prefix" &
   udp_client_pid="$!"
   wait_for_file "$prefix.client-ready"

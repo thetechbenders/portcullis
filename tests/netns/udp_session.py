@@ -28,6 +28,8 @@ def await_signal(prefix, suffix, seconds=20):
 def server(prefix):
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.bind(WAN)
+        # The client must never send INIT before this socket is bound.
+        signal(prefix, "bound")
         sock.settimeout(15)
         packet, addr = sock.recvfrom(64)
         if packet != b"INIT" or addr != GUEST:
@@ -72,8 +74,8 @@ def main():
     parser.add_argument("role", choices=["server", "client"])
     parser.add_argument("prefix")
     args = parser.parse_args()
-    # Use distinct 4-tuples across cases. This avoids a previous UDP flow's
-    # conntrack state contaminating the next case's authorized handshake.
+    # Distinct tuples keep the two cases independent. Server readiness is
+    # coordinated separately using the bound marker before client startup.
     global WAN, GUEST
     offset = 10 if args.prefix.endswith("expiry") else 0
     WAN = (WAN[0], WAN[1] + offset)

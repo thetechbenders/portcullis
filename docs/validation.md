@@ -6,10 +6,10 @@
 - Disposable Linux namespaces: guest, gateway, WAN and protected LAN with virtual Ethernet only.
 - nftables syntax/load and explicit **rule-labelled** guest INPUT/FORWARD counters.
 - One-way UDP probes and intentional wrong-interface mutations for both FORWARD directions.
-- Bootstrap validation with interface closed in the lab, followed by repeated **in-place**, same-hook-chain deny reconciliation.
+- Bootstrap behavior checked in an **isolated namespace** with guest0 administratively up; these tests do not establish that bootstrap is safe on a live guest interface. Repeated **in-place**, same-hook-chain reconciliation is tested separately.
 - Bounded UDP flood during hundreds of in-place reconciliations. Zero observed deliveries is an empirical condition, not a formal no-gap guarantee.
 - Parser and kernel-side transaction failure distinction; kernel EEXIST failure should preserve existing deny.
-- Test-only IPv4 grants expire in kernel; TCP and UDP receive-path checks prove forward/reverse packet denial following revocation/expiry with positive recovery controls.
+- Test-only IPv4 grants expire in kernel; TCP and UDP receive-path checks exercise blocked forwarding and reply delivery after revocation/expiry, with positive recovery controls.
 
 ## Still unverified or excluded
 
