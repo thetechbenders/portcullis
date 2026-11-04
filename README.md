@@ -14,6 +14,17 @@ The lab checks IPv4/IPv6 guest INPUT and bidirectional FORWARD filtering, per-ru
 
 **Not implemented:** production firewall installer and boot/reload ownership, verified network identity, bridge/flowtable/tc/XDP checks, trusted grant lifecycle, conntrack cleanup, privileged controller and IPC, captive portal, DHCP/DNS, UI, payment system or physical network integration.
 
+## Formnext vertical slice (in progress, uncommitted branch work)
+
+A disposable-namespace demonstration of the whole guest journey is being built on top of the Phase 3 attestor. See [docs/formnext-design.md](docs/formnext-design.md) for the contract and trust boundaries, and [docs/formnext-demo.md](docs/formnext-demo.md) for the booth runbook.
+
+- `portcullisd` (privileged): installs the persistent guard only while the guest link is down; attests it, bypass paths and topology before serving; built-in DHCPv4 server as the identity source; timed kernel grant elements; revoke-all on start; degraded fail-closed mode with optional guest link-down.
+- `portcullis-portal` (unprivileged): guest HTTP portal and static non-recursive DNS on the gateway guest address only. It passes each guest TCP socket to the controller, which derives identity from the kernel, never from the browser.
+- `portcullisctl`: operator snapshot, revoke and reset over a root-only socket, plus a loopback dashboard.
+- `demo/portcullis-lab.sh`: interactive namespace lab for the show (refuses to run on hephaestus).
+
+**Demo trust limit:** identity is (guest interface, gateway-issued DHCP address, Ethernet address), enforced by kernel `ip saddr . ether saddr` matching. A station that clones another guest's MAC *and* IP on the same segment shares that guest's access; the access layer must bind stations (WPA2/3 with client isolation).
+
 ## Checks
 
 Go 1.26 or newer:

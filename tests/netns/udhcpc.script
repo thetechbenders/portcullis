@@ -1,0 +1,34 @@
+#!/bin/sh
+# busybox udhcpc hook for disposable lab guests ONLY. Configures the leased
+# IPv4 address and default route inside the guest namespace that runs it.
+set -eu
+
+mask2len() {
+  len=0
+  for octet in $(echo "$1" | tr . ' '); do
+    case "$octet" in
+      255) len=$((len + 8)) ;; 254) len=$((len + 7)) ;; 252) len=$((len + 6)) ;;
+      248) len=$((len + 5)) ;; 240) len=$((len + 4)) ;; 224) len=$((len + 3)) ;;
+      192) len=$((len + 2)) ;; 128) len=$((len + 1)) ;; 0) ;;
+      *) echo "invalid netmask $1" >&2; exit 1 ;;
+    esac
+  done
+  echo "$len"
+}
+
+case "$1" in
+  deconfig)
+    ip -4 addr flush dev "$interface"
+    ;;
+  bound|renew)
+    ip -4 addr flush dev "$interface"
+    ip addr add "$ip/$(mask2len "${subnet:-255.255.255.0}")" dev "$interface"
+    if [ -n "${router:-}" ]; then
+      ip route replace default via "${router%% *}" dev "$interface"
+    fi
+    if [ -n "${E2E_LEASE_FILE:-}" ]; then
+      printf 'ip=%s router=%s dns=%s lease=%s\n' "$ip" "${router:-}" "${dns:-}" "${lease:-}" > "$E2E_LEASE_FILE"
+    fi
+    ;;
+esac
+exit 0
