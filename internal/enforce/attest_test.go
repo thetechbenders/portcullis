@@ -51,13 +51,13 @@ func TestVerifyDenyGuardRejectsMutations(t *testing.T) {
 			x[1].(map[string]any)["table"].(map[string]any)["flags"] = []any{"dormant"}
 			return x
 		},
-		"unhooked": func(x []any) []any { delete(x[2].(map[string]any)["chain"].(map[string]any), "hook"); return x },
-		"wrong hook": func(x []any) []any { x[3].(map[string]any)["chain"].(map[string]any)["hook"] = "output"; return x },
+		"unhooked":       func(x []any) []any { delete(x[2].(map[string]any)["chain"].(map[string]any), "hook"); return x },
+		"wrong hook":     func(x []any) []any { x[3].(map[string]any)["chain"].(map[string]any)["hook"] = "output"; return x },
 		"wrong priority": func(x []any) []any { x[3].(map[string]any)["chain"].(map[string]any)["prio"] = 0; return x },
-		"wrong policy": func(x []any) []any { x[2].(map[string]any)["chain"].(map[string]any)["policy"] = "drop"; return x },
-		"missing chain": func(x []any) []any { return append(x[:3], x[4:]...) },
-		"missing rule": func(x []any) []any { return x[:len(x)-1] },
-		"extra rule": func(x []any) []any { return append(x, x[5]) },
+		"wrong policy":   func(x []any) []any { x[2].(map[string]any)["chain"].(map[string]any)["policy"] = "drop"; return x },
+		"missing chain":  func(x []any) []any { return append(x[:3], x[4:]...) },
+		"missing rule":   func(x []any) []any { return x[:len(x)-1] },
+		"extra rule":     func(x []any) []any { return append(x, x[5]) },
 		"wrong interface": func(x []any) []any {
 			r := x[5].(map[string]any)["rule"].(map[string]any)
 			r["expr"].([]any)[0].(map[string]any)["match"].(map[string]any)["right"] = "wrongif0"
