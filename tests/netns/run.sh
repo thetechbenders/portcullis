@@ -63,7 +63,7 @@ matched = [r for r in rules if r.get("comment") == label]
 if len(matched) != 1:
     raise SystemExit("expected exactly one drop rule labelled " + label)
 expr = matched[0].get("expr", [])
-if not any(x.get("drop") is not None for x in expr):
+if not any("drop" in x for x in expr):
     raise SystemExit("labelled rule does not drop: " + label)
 counters = [x["counter"]["packets"] for x in expr if "counter" in x]
 if len(counters) != 1:
