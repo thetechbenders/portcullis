@@ -1,0 +1,266 @@
+#!/usr/bin/env bash
+# Disposable GitHub-hosted runner ONLY. Every link, sysctl and nft mutation
+# occurs inside namespaces owned by this invocation. Never run on a workstation.
+set -Eeuo pipefail
+[[ ${GITHUB_ACTIONS:-} == true && ${RUNNER_ENVIRONMENT:-} == github-hosted ]] || {
+  echo 'e2e: requires a disposable GitHub-hosted runner' >&2; exit 1;
+}
+source "$(dirname "${BASH_SOURCE[0]}")/../../demo/portcullis-lab.sh"
+need_root
+refuse_protected_host
+bindir="$(realpath "${1:?usage: e2e.sh BINDIR}")"
+for c in ip nft conntrack busybox setpriv python3 ping curl; do command -v "$c" >/dev/null || die "missing $c"; done
+[[ -d /proc/sys/net/ipv6 ]] || die 'IPv6 required; refusing to skip'
+state="$(mktemp -d /run/portcullis-e2e.XXXXXX)"
+chmod 755 "$state"
+prefix="pce$$"
+ns_gw=$prefix-gw ns_ap=$prefix-ap ns_a=$prefix-a ns_b=$prefix-b ns_wan=$prefix-wan ns_lan=$prefix-lan
+cleanup() {
+  local rc=$? ns pid
+  trap - EXIT
+  if (( rc != 0 )); then
+    echo 'E2E FAILURE: logs and namespace state follow' >&2
+    for f in "$state"/*.log; do [[ ! -f $f ]] || { echo "--- $f"; cat "$f"; }; done
+    ip netns exec "$ns_gw" nft list ruleset || true
+    ip -n "$ns_gw" -d link show || true
+  fi
+  for ns in "$ns_a" "$ns_b" "$ns_ap" "$ns_wan" "$ns_lan" "$ns_gw"; do
+    for pid in $(ip netns pids "$ns" 2>/dev/null); do kill "$pid" 2>/dev/null || true; done
+  done
+  for ns in "$ns_a" "$ns_b" "$ns_ap" "$ns_wan" "$ns_lan" "$ns_gw"; do ip netns del "$ns" 2>/dev/null || true; done
+  rm -rf -- "$state"
+  exit "$rc"
+}
+trap cleanup EXIT
+trap 'echo "e2e: failed at line $LINENO: $BASH_COMMAND" >&2' ERR
+gw() { ip netns exec "$ns_gw" "$@"; }
+a() { ip netns exec "$ns_a" "$@"; }
+b() { ip netns exec "$ns_b" "$@"; }
+ctl() { gw "$state/bin/portcullisctl" -config "$state/portcullis.json" "$@"; }
+attest() { gw "$state/bin/portcullisd" attest -config "$state/portcullis.json"; }
+stop_controller() {
+  kill -9 "$(cat "$state/portcullisd.pid")"
+  wait "$(cat "$state/portcullisd.pid")" 2>/dev/null || true
+  rm "$state/portcullisd.pid"
+}
+api() {
+  local ns=$1 path=$2; shift 2
+  ip netns exec "$ns" curl --noproxy '*' --fail-with-body --silent --show-error --max-time 8 \
+    -H 'Host: portal.portcullis.test' "http://10.203.0.1$path" "$@"
+}
+session_state() {
+  api "$1" /api/session | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["ok"],d; print(d["session"]["state"])'
+}
+grant() {
+  api "$ns_a" /api/access -H 'Origin: http://portal.portcullis.test' -H 'Content-Type: application/json' \
+    -H 'X-Portcullis-Request: 1' -d '{"duration_seconds":30}' > "$state/grant.json"
+  python3 - "$state/grant.json" <<'PY'
+import json,sys
+x=json.load(open(sys.argv[1])); s=x['session']
+assert x['ok'] and s['state']=='granted' and 0<s['remaining_seconds']<=s['granted_seconds']<=30,x
+PY
+}
+count() {
+  gw nft -j list table inet portcullis_guard | python3 -c '
+import json,sys
+name=sys.argv[1]
+r=[o["rule"] for o in json.load(sys.stdin)["nftables"] if "rule" in o and o["rule"].get("comment")==name]
+assert len(r)==1,r
+print(next(e["counter"]["packets"] for e in r[0]["expr"] if "counter" in e))' "$1"
+}
+# Only a receiver timeout (exit 1), with a live sender and increased directional
+# DROP counter, establishes non-delivery. Setup errors never count as a drop.
+probe() {
+  local receiver=$1 target=$2 sender=$3 expected=$4 rule=${5:-} before=0 after rc=0
+  [[ -z $rule ]] || before=$(count "$rule")
+  rm -f "$state/probe.ready"
+  ip netns exec "$receiver" python3 "$root/tests/netns/udp_probe.py" listen "$target" --ready "$state/probe.ready" &
+  local pid=$!
+  wait_file "$state/probe.ready"
+  ip netns exec "$sender" python3 "$root/tests/netns/udp_probe.py" send "$target"
+  wait "$pid" || rc=$?
+  if [[ $expected == allow ]]; then
+    (( rc == 0 )) || die "positive packet not delivered: $sender -> $target (rc=$rc)"
+  else
+    (( rc == 1 )) || die "expected receiver timeout: $sender -> $target (rc=$rc)"
+    after=$(count "$rule")
+    (( after > before )) || die "no $rule drop observed"
+  fi
+}
+install -d -m 755 "$state/bin" "$state/portal-ready"
+chown 65534:65534 "$state/portal-ready"
+install -m 755 "$bindir/portcullisd" "$bindir/portcullis-portal" "$bindir/portcullisctl" "$state/bin/"
+write_config
+build_topology
+# Temporary static fixture addresses prove every negative packet path before
+# installing the guard. DHCP replaces them below and is required to succeed.
+ip -n "$ns_a" addr add 10.203.0.100/24 dev eth0
+ip -n "$ns_b" addr add 10.203.0.101/24 dev eth0
+for ns in "$ns_a" "$ns_b"; do ip -n "$ns" route add default via 10.203.0.1; done
+ip -n "$ns_gw" link set guest0 up
+probe "$ns_wan" 198.18.0.2 "$ns_a" allow
+probe "$ns_wan" 198.18.0.2 "$ns_b" allow
+probe "$ns_a" 10.203.0.100 "$ns_wan" allow
+probe "$ns_lan" 10.204.0.2 "$ns_a" allow
+probe "$ns_wan" 192.168.77.2 "$ns_a" allow
+# IPv6 controls include working forwarding and permanent neighbours. Disabling
+# IPv6 is part of production topology; enable it again only with controller
+# stopped below, to prove the actual guard blocks it even without that layer.
+for ns in "$ns_gw" "$ns_a"; do ip netns exec "$ns" sysctl -qw net.ipv6.conf.all.disable_ipv6=0; done
+gw sysctl -qw net.ipv6.conf.guest0.disable_ipv6=0
+a sysctl -qw net.ipv6.conf.eth0.disable_ipv6=0
+gw sysctl -qw net.ipv6.conf.all.forwarding=1
+ip -n "$ns_gw" -6 addr add 2001:db8:203::1/64 dev guest0 nodad
+ip -n "$ns_a" -6 addr add 2001:db8:203::2/64 dev eth0 nodad
+ip -n "$ns_gw" -6 addr add 2001:db8:204::1/64 dev uplink0 nodad
+ip -n "$ns_wan" -6 addr add 2001:db8:204::2/64 dev eth0 nodad
+ip -n "$ns_a" -6 route add default via 2001:db8:203::1
+ip -n "$ns_wan" -6 route add 2001:db8:203::/64 via 2001:db8:204::1
+gwmac=$(ip -n "$ns_gw" -j link show guest0 | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["address"])')
+amac=$mac_a
+ip -n "$ns_a" -6 neigh replace 2001:db8:203::1 lladdr "$gwmac" dev eth0 nud permanent
+ip -n "$ns_gw" -6 neigh replace 2001:db8:203::2 lladdr "$amac" dev guest0 nud permanent
+a ping -6 -n -c 1 -W 2 2001:db8:204::2
+ip netns exec "$ns_wan" ping -6 -n -c 1 -W 2 2001:db8:203::2
+gw sysctl -qw net.ipv6.conf.guest0.disable_ipv6=1
+a sysctl -qw net.ipv6.conf.eth0.disable_ipv6=1
+ip -n "$ns_gw" link set guest0 down
+gw "$state/bin/portcullisd" bootstrap -config "$state/portcullis.json"
+ip -n "$ns_gw" link set guest0 up
+start_controller
+start_bg portal ip netns exec "$ns_gw" setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs \
+  "$state/bin/portcullis-portal" -config "$state/portcullis.json" -ready-file "$state/portal-ready/ready"
+wait_file "$state/portal-ready/ready"
+dhcp_guest "$ns_a"
+dhcp_guest "$ns_b"
+ip_a=$(ip -n "$ns_a" -4 -j addr show eth0 | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["addr_info"][0]["local"])')
+[[ $ip_a == 10.203.0.100 ]] || die "unexpected DHCP fixture address: $ip_a"
+[[ $(session_state "$ns_a") == denied && $(session_state "$ns_b") == denied ]] || die 'initial state not denied'
+api "$ns_a" / > /dev/null
+probe "$ns_wan" 198.18.0.2 "$ns_a" deny guest-egress
+# DNS isolation: real UDP replies, not an external resolver.
+a python3 - <<'PY'
+import socket,struct
+for name,typ,rcode,answers in [('portal.portcullis.test',1,0,1),('example.org',1,5,0),('portal.portcullis.test',28,0,0)]:
+ q=struct.pack('!6H',123,0x100,1,0,0,0)+b''.join(bytes([len(x)])+x.encode() for x in name.split('.'))+b'\0'+struct.pack('!HH',typ,1)
+ with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:
+  s.settimeout(3); s.sendto(q,('10.203.0.1',53)); r,_=s.recvfrom(512)
+  ident,flags,qd,an,ns,ar=struct.unpack('!6H',r[:12])
+  assert ident==123 and flags&15==rcode and not flags&128 and an==answers,(name,r)
+PY
+grant
+probe "$ns_wan" 198.18.0.2 "$ns_a" allow
+probe "$ns_wan" 198.18.0.2 "$ns_b" deny guest-egress
+probe "$ns_lan" 10.204.0.2 "$ns_a" deny guest-protected
+probe "$ns_wan" 192.168.77.2 "$ns_a" deny guest-protected
+# Spoof A's IPv4 address using B's own MAC: tuple check must stop it.
+ip -n "$ns_b" addr add 10.203.0.100/32 dev eth0
+before=$(count guest-egress)
+b ping -n -c 1 -W 1 -I 10.203.0.100 198.18.0.2 && die 'spoofed IP authorized'
+(( $(count guest-egress) > before )) || die 'no anti-spoof drop'
+ip -n "$ns_b" addr del 10.203.0.100/32 dev eth0
+# Restore A's ARP evidence after intentional spoofing.
+ip -n "$ns_gw" neigh del 10.203.0.100 dev guest0
+a ping -n -c 1 -W 2 198.18.0.2
+flow_case() {
+  local kind=$1 f="$state/flow-$1" server client before_in before_out
+  ctl reset > /dev/null
+  grant
+  ip netns exec "$ns_wan" python3 "$root/tests/netns/e2e_flow.py" server "$f" "$ip_a" & server=$!
+  wait_file "$f.bound"
+  a python3 "$root/tests/netns/e2e_flow.py" client "$f" "$ip_a" & client=$!
+  wait_file "$f.ready"
+  case $kind in
+    revoke) ctl revoke "$mac_a" > /dev/null ;;
+    expiry) stop_controller; sleep 31 ;;
+    restart) stop_controller; start_controller ;;
+  esac
+  # Raw nft read before any controller request: expiry must be kernel-only;
+  # restart must already have removed inherited elements before readiness.
+  for setname in granted_v4 granted_dst_v4; do
+    gw nft -j list set inet portcullis_guard "$setname" | python3 -c 'import json,sys; sets=[o["set"] for o in json.load(sys.stdin)["nftables"] if "set" in o]; assert len(sets)==1 and not sets[0].get("elem"),sets'
+  done
+  before_in=$(count guest-ingress); before_out=$(count guest-egress)
+  touch "$f.trigger"
+  wait_file "$f.blocked"
+  (( $(count guest-ingress) > before_in && $(count guest-egress) > before_out )) || die "$kind missing directional drops"
+  [[ ! -e $f.leaked ]] || die "$kind outbound leaked"
+  [[ $kind != expiry ]] || start_controller
+  ctl reset > /dev/null
+  grant
+  touch "$f.resume"
+  wait_file "$f.recovered"
+  wait "$client"; wait "$server"
+  echo "PASS: $kind stops both directions; same sockets recover after new authorization"
+}
+flow_case revoke
+flow_case expiry
+flow_case restart
+# Crash with no grants: default deny persists and no second guest gets access.
+ctl reset > /dev/null
+stop_controller
+probe "$ns_wan" 198.18.0.2 "$ns_a" deny guest-egress
+probe "$ns_wan" 198.18.0.2 "$ns_b" deny guest-egress
+# Prove IPv6 guard drops independently of disable_ipv6, using the pretested route.
+gw sysctl -qw net.ipv6.conf.guest0.disable_ipv6=0
+a sysctl -qw net.ipv6.conf.eth0.disable_ipv6=0
+ip -n "$ns_gw" -6 addr add 2001:db8:203::1/64 dev guest0 nodad
+ip -n "$ns_a" -6 addr add 2001:db8:203::2/64 dev eth0 nodad
+ip -n "$ns_a" -6 route add default via 2001:db8:203::1
+ip -n "$ns_a" -6 neigh replace 2001:db8:203::1 lladdr "$gwmac" dev eth0 nud permanent
+ip -n "$ns_gw" -6 neigh replace 2001:db8:203::2 lladdr "$amac" dev guest0 nud permanent
+before=$(count guest-egress)
+a ping -6 -n -c 1 -W 1 2001:db8:204::2 && die 'IPv6 escaped'
+(( $(count guest-egress) > before )) || die 'missing IPv6 egress drop'
+before=$(count guest-ingress)
+ip netns exec "$ns_wan" ping -6 -n -c 1 -W 1 2001:db8:203::2 && die 'IPv6 ingress escaped'
+(( $(count guest-ingress) > before )) || die 'missing IPv6 ingress drop'
+gw sysctl -qw net.ipv6.conf.guest0.disable_ipv6=1
+a sysctl -qw net.ipv6.conf.eth0.disable_ipv6=1
+# Each mutation must fail explicit attestation AND drive a live controller
+# into degraded mode, flushing grants and taking the guest link down.
+mutation() {
+ local kind=$1
+ start_controller
+ ctl reset >/dev/null
+ grant
+ case $kind in
+  hook) gw nft 'flush chain inet portcullis_guard guest_forward'
+        gw nft 'delete chain inet portcullis_guard guest_forward'
+        gw nft 'add chain inet portcullis_guard guest_forward { type filter hook output priority -50; policy accept; }' ;;
+  dormant) gw nft 'add table inet portcullis_guard { flags dormant; }' ;;
+  missing) gw nft 'flush chain inet portcullis_guard guest_forward'; gw nft 'delete chain inet portcullis_guard guest_forward' ;;
+  vlan) ip -n "$ns_gw" link add link guest0 name upper0 type vlan id 17 ;;
+  macvlan) ip -n "$ns_gw" link add link guest0 name upper0 type macvlan mode bridge ;;
+  ipvlan) ip -n "$ns_gw" link add link guest0 name upper0 type ipvlan mode l2 ;;
+ esac
+ if attest; then die "$kind attested unexpectedly"; fi
+ for _ in {1..100}; do
+  ctl snapshot > "$state/snapshot.json"
+  if python3 - "$state/snapshot.json" <<'PY'
+import json,sys
+x=json.load(open(sys.argv[1])); assert x['snapshot']['enforcement']=='degraded',x
+PY
+  then break; fi
+  sleep .1
+ done
+ python3 - "$state/snapshot.json" <<'PY'
+import json,sys
+x=json.load(open(sys.argv[1])); assert x['snapshot']['enforcement']=='degraded',x
+PY
+ ip -n "$ns_gw" -j link show guest0 | python3 -c 'import json,sys; assert "UP" not in json.load(sys.stdin)[0]["flags"]'
+ # With link down, no valid grant can be issued. Prove startup refuses too.
+ stop_controller
+ if gw "$state/bin/portcullisd" run -config "$state/portcullis.json"; then die "$kind startup accepted"; fi
+ ip -n "$ns_gw" link del upper0 2>/dev/null || true
+ # Table replacement is solely an offline test reset with guest link DOWN.
+ gw nft delete table inet portcullis_guard
+ gw "$state/bin/portcullisd" bootstrap -config "$state/portcullis.json"
+ ip -n "$ns_gw" link set guest0 up
+ start_controller
+ dhcp_guest "$ns_a"; dhcp_guest "$ns_b"
+ stop_controller
+ echo "PASS: $kind rejected at runtime and startup"
+}
+for kind in hook dormant missing vlan macvlan ipvlan; do mutation "$kind"; done
+echo 'PASS: Formnext DHCP, portal, timed kernel grants, revoke, crash, restart, anti-spoof, LAN, IPv6, DNS and adversarial topology'

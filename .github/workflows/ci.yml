@@ -28,7 +28,10 @@ jobs:
           gofmt -d .
           test -z "$(gofmt -l .)"
       - name: Script syntax
-        run: bash -n tests/netns/run.sh && python3 -m py_compile tests/netns/tcp_fixture.py tests/netns/udp_probe.py tests/netns/udp_session.py tests/netns/udp_flood.py
+        run: |
+          bash -n tests/netns/run.sh tests/netns/e2e.sh demo/portcullis-lab.sh
+          sh -n tests/netns/udhcpc.script
+          python3 -m py_compile tests/netns/*.py demo/nsproxy.py
   netns:
     timeout-minutes: 10
     runs-on: ubuntu-24.04
@@ -49,3 +52,24 @@ jobs:
           go test -tags netnslab ./internal/enforce
       - name: Namespace packet integration tests
         run: sudo bash tests/netns/run.sh "${{ runner.temp }}/portcullis-policy" "${{ runner.temp }}/portcullis-netnslab-policy" "${{ runner.temp }}/portcullis-verify"
+
+  e2e:
+    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install disposable namespace prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nftables iproute2 iputils-ping conntrack busybox curl
+      - name: Compile Formnext processes
+        run: |
+          mkdir -p "${{ runner.temp }}/formnext-bin"
+          for cmd in portcullisd portcullis-portal portcullisctl; do
+            go build -o "${{ runner.temp }}/formnext-bin/$cmd" "./cmd/$cmd"
+          done
+      - name: Formnext kernel end-to-end tests
+        run: sudo env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted bash tests/netns/e2e.sh "${{ runner.temp }}/formnext-bin"
