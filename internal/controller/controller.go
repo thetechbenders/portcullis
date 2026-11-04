@@ -548,6 +548,19 @@ func (c *Controller) degradeLocked(reason string) {
 	c.reason = sanitize(reason, 256)
 	c.log.Error("enforcement degraded", "reason", c.reason)
 	c.eventLocked("degraded", c.reason)
+	// Isolate before attempting cleanup: an absent/dormant guard cannot
+	// protect packets while nft or conntrack cleanup is slow or failing.
+	// Its deadline is independent of all later cleanup operations.
+	if c.failsafe != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+		err := c.failsafe.Engage(ctx, c.reason)
+		cancel()
+		if err != nil {
+			c.eventLocked("failsafe-failed", sanitize(err.Error(), 128))
+		} else {
+			c.eventLocked("failsafe", "guest isolation engaged")
+		}
+	}
 	addrs := map[netip.Addr]bool{}
 	for _, g := range c.grants {
 		addrs[g.addr] = true
@@ -567,13 +580,6 @@ func (c *Controller) degradeLocked(reason string) {
 	}
 	for _, a := range sortedAddrs(addrs) {
 		c.flushFlowsLocked(a)
-	}
-	if c.failsafe != nil {
-		if err := c.failsafe.Engage(cctx, c.reason); err != nil {
-			c.eventLocked("failsafe-failed", sanitize(err.Error(), 128))
-		} else {
-			c.eventLocked("failsafe", "guest isolation engaged")
-		}
 	}
 }
 

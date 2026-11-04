@@ -565,3 +565,31 @@ func TestReconcileBoundElements(t *testing.T) {
 		t.Fatal("bound elements not converged")
 	}
 }
+
+// A missing guard is already unsafe: cleanup must not delay link isolation
+// or exhaust the context subsequently passed to the failsafe.
+type orderingFailsafe struct {
+	k      *fakeKernel
+	before int
+	t      *testing.T
+}
+
+func (f orderingFailsafe) Engage(ctx context.Context, _ string) error {
+	if ctx.Err() != nil {
+		f.t.Fatal("failsafe received exhausted cleanup context")
+	}
+	if f.k.count("FlushGrants") != f.before {
+		f.t.Fatal("cleanup ran before isolation")
+	}
+	return nil
+}
+func TestDegradedIsolatesBeforeFailingCleanup(t *testing.T) {
+	e := newEnv(t)
+	e.start()
+	e.c.failsafe = orderingFailsafe{k: e.k, before: e.k.count("FlushGrants"), t: t}
+	e.k.setFail("Attest", errInjected)
+	e.k.setFail("FlushGrants", errInjected)
+	if err := e.c.Reconcile(context.Background()); !errors.Is(err, ErrDegraded) {
+		t.Fatal(err)
+	}
+}
