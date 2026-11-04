@@ -22,7 +22,13 @@ cleanup() {
     echo 'E2E FAILURE: logs and namespace state follow' >&2
     for f in "$state"/*.log; do [[ ! -f $f ]] || { echo "--- $f"; cat "$f"; }; done
     ip netns exec "$ns_gw" nft list ruleset || true
-    ip -n "$ns_gw" -d link show || true
+    for ns in "$ns_a" "$ns_b" "$ns_gw" "$ns_wan"; do
+      echo "--- namespace $ns"
+      ip -n "$ns" -d link show || true
+      ip -n "$ns" addr show || true
+      ip -n "$ns" -6 route show || true
+      ip -n "$ns" -6 neigh show || true
+    done
   fi
   for ns in "$ns_a" "$ns_b" "$ns_ap" "$ns_wan" "$ns_lan" "$ns_gw"; do
     for pid in $(ip netns pids "$ns" 2>/dev/null); do kill "$pid" 2>/dev/null || true; done
@@ -120,6 +126,12 @@ gwmac=$(ip -n "$ns_gw" -j link show guest0 | python3 -c 'import json,sys; print(
 amac=$mac_a
 ip -n "$ns_a" -6 neigh replace 2001:db8:203::1 lladdr "$gwmac" dev eth0 nud permanent
 ip -n "$ns_gw" -6 neigh replace 2001:db8:203::2 lladdr "$amac" dev guest0 nud permanent
+# Make the complete IPv6 control route deterministic: the first one-shot
+# probe must test forwarding, not race asynchronous neighbour discovery.
+wanmac=$(ip -n "$ns_wan" -j link show eth0 | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["address"])')
+uplinkmac=$(ip -n "$ns_gw" -j link show uplink0 | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["address"])')
+ip -n "$ns_gw" -6 neigh replace 2001:db8:204::2 lladdr "$wanmac" dev uplink0 nud permanent
+ip -n "$ns_wan" -6 neigh replace 2001:db8:204::1 lladdr "$uplinkmac" dev eth0 nud permanent
 a ping -6 -n -c 1 -W 2 2001:db8:204::2
 ip netns exec "$ns_wan" ping -6 -n -c 1 -W 2 2001:db8:203::2
 gw sysctl -qw net.ipv6.conf.guest0.disable_ipv6=1

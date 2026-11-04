@@ -82,3 +82,17 @@ positive controls before guard installation.
   disposable demo VM; automated packet CI does not establish browser UX acceptance.
 - Access-layer station binding before any shared-segment production use.
 - Keep NAT, HTTPS, physical deployment and infrastructure changes out of this slice.
+
+## Validation correction
+
+[Run 41928167682](https://github.com/thetechbenders/portcullis/actions/runs/41928167682)
+for `4f5111d0e8bf9d4ce659c08334a6776f2b62997a` failed the initial IPv6
+positive-control ping before guard/controller startup. The fixture still depended
+on neighbour discovery on its uplink, unlike its guest leg. The harness now
+installs permanent IPv6 neighbours on both ends of that disposable uplink and
+dumps address, route and neighbour state on failure. The genuine delivery
+assertions and negative drop-counter requirements are unchanged. This correction
+requires a fresh complete CI run; the failed check is not treated as acceptance.
+
+Fresh local fuzzing on 2026-11-04 passed: `FuzzRespond` for 15s (550542 executions)
+and `FuzzParseRequest` for 15s (409395 executions), each with two workers.
