@@ -78,7 +78,7 @@ type File struct {
 	ConntrackPath         string            `json:"conntrack_path"`
 	IPPath                string            `json:"ip_path"`
 	// Mandatory: omitted and false configurations are rejected.
-	FailsafeLinkDown      bool              `json:"failsafe_link_down"`
+	FailsafeLinkDown bool `json:"failsafe_link_down"`
 }
 
 // Config is the validated, typed configuration.
