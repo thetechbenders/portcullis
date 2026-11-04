@@ -54,22 +54,45 @@ expect_block() {
   fi
 }
 drop_count() {
-  ip netns exec "$gw" nft -j list chain inet "$1" "$2" | python3 -c '
+  local table="$1" chain="$2" label="$3"
+  ip netns exec "$gw" nft -j list chain inet "$table" "$chain" | python3 -c '
 import json, sys
-data = json.load(sys.stdin)["nftables"]
-print(sum(int(e["counter"]["packets"])
-    for item in data for rule in [item.get("rule", {})]
-    if any("drop" in e for e in rule.get("expr", []))
-    for e in rule.get("expr", []) if "counter" in e))
-'
+label = sys.argv[1]
+rules = [x["rule"] for x in json.load(sys.stdin)["nftables"] if "rule" in x]
+matched = [r for r in rules if r.get("comment") == label]
+if len(matched) != 1:
+    raise SystemExit("expected exactly one drop rule labelled " + label)
+expr = matched[0].get("expr", [])
+if not any(x.get("drop") is not None for x in expr):
+    raise SystemExit("labelled rule does not drop: " + label)
+counters = [x["counter"]["packets"] for x in expr if "counter" in x]
+if len(counters) != 1:
+    raise SystemExit("expected one counter for " + label)
+print(int(counters[0]))
+' "$label"
 }
 expect_drop() {
-  local table="$1" chain="$2" before after
-  shift 2
-  before="$(drop_count "$table" "$chain")"
+  local table="$1" chain="$2" label="$3" before after
+  shift 3
+  before="$(drop_count "$table" "$chain" "$label")"
   expect_block "$@"
-  after="$(drop_count "$table" "$chain")"
-  (( after > before )) || fail "no packet counted by $table/$chain drop: $* ($before -> $after)"
+  after="$(drop_count "$table" "$chain" "$label")"
+  (( after > before )) || fail "no packet counted by $table/$chain/$label: $* ($before -> $after)"
+}
+# Return success only when the destination namespace actually receives
+# the one-way UDP datagram. No echo response or reverse route is involved.
+udp_delivered() {
+  local receiver="$1" target="$2" sender="$3" marker="$tmp/udp-$RANDOM.ready" pid
+  ip netns exec "$receiver" python3 "$root/tests/netns/udp_probe.py" listen "$target" --ready "$marker" &
+  pid=$!
+  wait_for_file "$marker"
+  ip netns exec "$sender" python3 "$root/tests/netns/udp_probe.py" send "$target"
+  if wait "$pid"; then
+    rm -f "$marker"
+    return 0
+  fi
+  rm -f "$marker"
+  return 1
 }
 wait_for_file() {
   local file="$1"
@@ -131,6 +154,9 @@ expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 10.204.0.2
 expect_allow ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:204::2
 expect_allow ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:205::2
+# Confirm one-way UDP delivery prior to loading nft rules.
+udp_delivered "$wan" 198.18.0.2 "$guest" || fail "missing guest->WAN UDP precondition"
+udp_delivered "$guest" 10.203.0.2 "$wan" || fail "missing WAN->guest UDP precondition"
 # Reverse-direction preconditions must succeed without nft filtering.
 expect_allow ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
 expect_allow ip netns exec "$lan" ping -n -c 1 -W 2 10.203.0.2
@@ -142,17 +168,39 @@ ip netns exec "$gw" nft -c -f "$tmp/baseline.nft"
 ip netns exec "$gw" nft -f "$tmp/baseline.nft"
 
 echo "Checking fail-closed baseline for INPUT, FORWARD, IPv4, IPv6"
-expect_drop portcullis_guard guest_input ip netns exec "$guest" ping -n -c 1 -W 2 10.203.0.1
-expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
-expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 10.204.0.2
-expect_drop portcullis_guard guest_input ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:203::1
-expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:204::2
-expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:205::2
+expect_drop portcullis_guard guest_input guest-input ip netns exec "$guest" ping -n -c 1 -W 2 10.203.0.1
+expect_drop portcullis_guard guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+expect_drop portcullis_guard guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 10.204.0.2
+expect_drop portcullis_guard guest_input guest-input ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:203::1
+expect_drop portcullis_guard guest_forward guest-egress ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:204::2
+expect_drop portcullis_guard guest_forward guest-egress ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:205::2
 echo "Checking reverse traffic is dropped at the gateway FORWARD hook"
-expect_drop portcullis_guard guest_forward ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
-expect_drop portcullis_guard guest_forward ip netns exec "$lan" ping -n -c 1 -W 2 10.203.0.2
-expect_drop portcullis_guard guest_forward ip netns exec "$wan" ping -6 -n -c 1 -W 2 2001:db8:203::2
-expect_drop portcullis_guard guest_forward ip netns exec "$lan" ping -6 -n -c 1 -W 2 2001:db8:203::2
+expect_drop portcullis_guard guest_forward guest-ingress ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
+expect_drop portcullis_guard guest_forward guest-ingress ip netns exec "$lan" ping -n -c 1 -W 2 10.203.0.2
+expect_drop portcullis_guard guest_forward guest-ingress ip netns exec "$wan" ping -6 -n -c 1 -W 2 2001:db8:203::2
+expect_drop portcullis_guard guest_forward guest-ingress ip netns exec "$lan" ping -6 -n -c 1 -W 2 2001:db8:203::2
+# One-way delivery is the decisive oracle: ping can fail only on its
+# return path. A deliberately broken direction MUST be detected here.
+if udp_delivered "$wan" 198.18.0.2 "$guest"; then fail "guest->WAN UDP escaped baseline"; fi
+if udp_delivered "$guest" 10.203.0.2 "$wan"; then fail "WAN->guest UDP escaped baseline"; fi
+
+echo "Mutation self-test: broken ingress and egress rules must be detected"
+sed 's/oifname "guest0" counter drop comment "guest-ingress"/oifname "wrongif0" counter drop comment "guest-ingress"/' "$tmp/baseline.nft" > "$tmp/mut-ingress.nft"
+ip netns exec "$gw" nft -f "$tmp/mut-ingress.nft"
+# The WAN probe must now arrive, and the guest-ingress rule's counter must
+# remain unchanged. A test based on aggregate FORWARD counters would miss it.
+udp_delivered "$guest" 10.203.0.2 "$wan" || fail "ingress mutation failed to expose UDP bypass"
+if ( expect_drop portcullis_guard guest_forward guest-ingress ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2 ) >/dev/null 2>&1; then
+  fail "ingress mutation was not rejected by its directional counter oracle"
+fi
+ip netns exec "$gw" nft -f "$tmp/baseline.nft"
+sed 's/iifname "guest0" counter drop comment "guest-egress"/iifname "wrongif0" counter drop comment "guest-egress"/' "$tmp/baseline.nft" > "$tmp/mut-egress.nft"
+ip netns exec "$gw" nft -f "$tmp/mut-egress.nft"
+udp_delivered "$wan" 198.18.0.2 "$guest" || fail "egress mutation failed to expose UDP bypass"
+if ( expect_drop portcullis_guard guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2 ) >/dev/null 2>&1; then
+  fail "egress mutation was not rejected by its directional counter oracle"
+fi
+ip netns exec "$gw" nft -f "$tmp/baseline.nft"
 # Other ingress should not be collateral damage.
 expect_allow ip netns exec "$wan" ping -n -c 1 -W 2 198.18.0.1
 
@@ -171,17 +219,17 @@ expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 # One nft -f invocation must remove both bad permits without a gap.
 ip netns exec "$gw" nft -c -f "$tmp/baseline.nft"
 ip netns exec "$gw" nft -f "$tmp/baseline.nft"
-expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
-expect_drop portcullis_guard guest_forward ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
+expect_drop portcullis_guard guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+expect_drop portcullis_guard guest_forward guest-ingress ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
 forward_rules="$(ip netns exec "$gw" nft -j list chain inet portcullis_guard guest_forward | python3 -c 'import json,sys; print(sum("rule" in e for e in json.load(sys.stdin)["nftables"]))')"
 [[ "$forward_rules" -eq 2 ]] || fail "stale rules survived atomic replacement"
 # A broken transaction must reject the whole batch and preserve the deny.
-{ cat "$tmp/baseline.nft"; echo 'add rule inet portcullis_guard guest_forward this_is_not_a_valid_expression'; } > "$tmp/invalid.nft"
+{ cat "$tmp/baseline.nft"; echo 'create table inet portcullis_guard'; } > "$tmp/invalid.nft"
 if ip netns exec "$gw" nft -f "$tmp/invalid.nft" >/dev/null 2>&1; then
   fail "invalid firewall transaction was accepted"
 fi
-expect_drop portcullis_guard guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
-expect_drop portcullis_guard guest_forward ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
+expect_drop portcullis_guard guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+expect_drop portcullis_guard guest_forward guest-ingress ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
 
 # Switch the policy ONLY in this throwaway namespace. Never use the test
 # source-IP fixture as a production identity/authorization mechanism.
@@ -189,20 +237,20 @@ expect_drop portcullis_guard guest_forward ip netns exec "$wan" ping -n -c 1 -W 
 { echo 'delete table inet portcullis_guard'; cat "$tmp/timed.nft"; } > "$tmp/switch.nft"
 ip netns exec "$gw" nft -c -f "$tmp/switch.nft"
 ip netns exec "$gw" nft -f "$tmp/switch.nft"
-expect_drop portcullis_lab guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+expect_drop portcullis_lab guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 printf 'add element inet portcullis_lab test_allow_v4 { 10.203.0.2 timeout 60s }\n' > "$tmp/allow.nft"
 ip netns exec "$gw" nft -f "$tmp/allow.nft"
 expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
-expect_drop portcullis_lab guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 10.204.0.2
+expect_drop portcullis_lab guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 10.204.0.2
 # A permitted guest's return packets work only for established flows.
 # Unsolicited reverse traffic and all IPv6 still hit the drop rule.
-expect_drop portcullis_lab guest_forward ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
-expect_drop portcullis_lab guest_forward ip netns exec "$lan" ping -n -c 1 -W 2 10.203.0.2
-expect_drop portcullis_lab guest_forward ip netns exec "$wan" ping -6 -n -c 1 -W 2 2001:db8:203::2
-expect_drop portcullis_lab guest_input ip netns exec "$guest" ping -n -c 1 -W 2 10.203.0.1
-expect_drop portcullis_lab guest_forward ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:204::2
+expect_drop portcullis_lab guest_forward guest-ingress ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
+expect_drop portcullis_lab guest_forward guest-ingress ip netns exec "$lan" ping -n -c 1 -W 2 10.203.0.2
+expect_drop portcullis_lab guest_forward guest-ingress ip netns exec "$wan" ping -6 -n -c 1 -W 2 2001:db8:203::2
+expect_drop portcullis_lab guest_input guest-input ip netns exec "$guest" ping -n -c 1 -W 2 10.203.0.1
+expect_drop portcullis_lab guest_forward guest-egress ip netns exec "$guest" ping -6 -n -c 1 -W 2 2001:db8:204::2
 ip -n "$guest" addr add 10.203.0.3/24 dev eth0
-expect_drop portcullis_lab guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 -I 10.203.0.3 198.18.0.2
+expect_drop portcullis_lab guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 -I 10.203.0.3 198.18.0.2
 
 echo "Checking explicit revocation terminates an existing TCP stream"
 ip netns exec "$wan" python3 "$root/tests/netns/tcp_fixture.py" server --ready "$tmp/server.ready" &
@@ -213,13 +261,13 @@ client_pid="$!"
 wait_for_file "$tmp/client.ready"
 printf 'delete element inet portcullis_lab test_allow_v4 { 10.203.0.2 }\n' > "$tmp/revoke.nft"
 ip netns exec "$gw" nft -f "$tmp/revoke.nft"
-before_revoke="$(drop_count portcullis_lab guest_forward)"
+before_revoke="$(drop_count portcullis_lab guest_forward guest-egress)"
 touch "$tmp/revoke.now"
 wait_for_file "$tmp/client.result"
 [[ "$(cat "$tmp/client.result")" == "timeout" ]] || fail "TCP revocation did not time out"
 kill -0 "$server_pid" || fail "server died during revoked interval"
 [[ ! -f "$tmp/server.ready.2" ]] || fail "revoked TCP payload reached the server"
-after_revoke="$(drop_count portcullis_lab guest_forward)"
+after_revoke="$(drop_count portcullis_lab guest_forward guest-egress)"
 (( after_revoke > before_revoke )) || fail "no forwarded TCP packet was dropped"
 # Regrant while the connection remains open; prove the SAME TCP socket can
 # receive the queued server response. A failed/dead peer cannot pass.
@@ -231,13 +279,13 @@ client_pid=""
 [[ "$(cat "$tmp/client.result")" == "recovered" ]] || fail "connection failed to recover"
 [[ -f "$tmp/server.ready.2" ]] || fail "server never received the restored payload"
 ip netns exec "$gw" nft -f "$tmp/revoke.nft"
-expect_drop portcullis_lab guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+expect_drop portcullis_lab guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 
 echo "Checking kernel timeout expires a grant without any userspace daemon"
 printf 'add element inet portcullis_lab test_allow_v4 { 10.203.0.2 timeout 3s }\n' > "$tmp/short.nft"
 ip netns exec "$gw" nft -f "$tmp/short.nft"
 expect_allow ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 sleep 4
-expect_drop portcullis_lab guest_forward ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
+expect_drop portcullis_lab guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 
 echo "PASS: isolated default-deny, IPv4/IPv6, timed grant, protected LAN, TCP revocation"
