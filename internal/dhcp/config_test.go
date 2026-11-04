@@ -16,6 +16,7 @@ func TestConfigFromLab(t *testing.T) {
 		GrantDefaultSeconds: 60, GrantMaxSeconds: 300,
 		GuestSocket: "/run/portcullis/guest.sock", OperatorSocket: "/run/portcullis/operator.sock",
 		PortalUID: 65534, NFTPath: "/usr/sbin/nft", ConntrackPath: "/usr/sbin/conntrack", IPPath: "/usr/sbin/ip",
+		FailsafeLinkDown: true,
 	}.Validate()
 	if err != nil {
 		t.Fatal(err)

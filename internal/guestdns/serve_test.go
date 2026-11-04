@@ -31,7 +31,8 @@ func TestZoneFromConfigAndValidation(t *testing.T) {
 		"portal_hostnames":["portal.portcullis.test"],"dns_records":{"demo.portcullis.test":"198.18.0.2"},
 		"grant_default_seconds":60,"grant_max_seconds":300,"revoke_cooldown_seconds":60,
 		"guest_socket":"/run/portcullis/guest.sock","operator_socket":"/run/portcullis/operator.sock",
-		"portal_uid":65534,"nft_path":"/usr/sbin/nft","conntrack_path":"/usr/sbin/conntrack","ip_path":"/usr/sbin/ip"}`))
+		"portal_uid":65534,"nft_path":"/usr/sbin/nft","conntrack_path":"/usr/sbin/conntrack","ip_path":"/usr/sbin/ip",
+		"failsafe_link_down":true}`))
 	if err != nil {
 		t.Fatal(err)
 	}
