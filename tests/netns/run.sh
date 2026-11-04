@@ -7,12 +7,13 @@ if (( EUID != 0 )); then
   echo "Must run as root on a disposable test runner" >&2
   exit 2
 fi
-if (( $# != 2 )) || [[ ! -x "$1" ]] || [[ ! -x "$2" ]]; then
-  echo "Usage: sudo bash tests/netns/run.sh /path/to/normal-policy /path/to/netnslab-policy" >&2
+if (( $# != 3 )) || [[ ! -x "$1" ]] || [[ ! -x "$2" ]] || [[ ! -x "$3" ]]; then
+  echo "Usage: sudo bash tests/netns/run.sh /path/to/normal-policy /path/to/netnslab-policy /path/to/guard-verifier" >&2
   exit 2
 fi
 bin="$1"
 labbin="$2"
+verifybin="$3"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 tmp="$(mktemp -d)"
 guest="pcguest$$"
@@ -181,6 +182,13 @@ fi
 ip netns exec "$gw" nft -c -f "$tmp/baseline.nft"
 ip netns exec "$gw" nft -f "$tmp/baseline.nft"
 
+echo "Checking observed nft JSON with Phase 3 deny-only attestor"
+# Build/verify is entirely inside hosted disposable CI. No host rules touched.
+ip netns exec "$gw" nft -j list table inet portcullis_guard | "$verifybin" -guest guest0
+# A mismatched interface must never verify successfully.
+if ip netns exec "$gw" nft -j list table inet portcullis_guard | "$verifybin" -guest wrongif0 >/dev/null 2>&1; then
+  fail "attestor accepted the wrong guest interface"
+fi
 echo "Checking fail-closed baseline for INPUT, FORWARD, IPv4, IPv6"
 expect_drop portcullis_guard guest_input guest-input ip netns exec "$guest" ping -n -c 1 -W 2 10.203.0.1
 expect_drop portcullis_guard guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
@@ -231,6 +239,7 @@ for iteration in {1..30}; do ip netns exec "$gw" nft -f "$tmp/reconcile.nft"; do
 expect_drop portcullis_guard guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 expect_drop portcullis_guard guest_forward guest-ingress ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
 
+ip netns exec "$gw" nft -j list table inet portcullis_guard | "$verifybin" -guest guest0
 echo "Stress testing persistent base-chain reconciliation under UDP flood"
 # A bounded stress test is empirical evidence, not a mathematical proof
 # of gap freedom on all kernels or offloaded packet paths.
