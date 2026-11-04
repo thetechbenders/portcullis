@@ -18,7 +18,9 @@ var safeInterface = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}$`)
 //
 // The add/delete/redefine sequence is a SINGLE nft transaction when sent
 // through one nft -f invocation; NEVER execute its statements separately.
-// It removes stale sets and grants in this table. This is still inert text,
+// It removes stale sets and grants in this table. Replacing base chains
+// can expose packets during a kernel generation transition, so this is not
+// yet a safe production reconciliation strategy. This is inert text,
 // not a production installer: table ownership, interface identity, hook
 // bypasses and persistence require independent deployment controls.
 func RenderDenyBaseline(guestInterface string) (string, error) {
@@ -33,12 +35,12 @@ delete table inet portcullis_guard
 table inet portcullis_guard {
     chain guest_input {
         type filter hook input priority -50; policy accept;
-        iifname %q counter drop
+        iifname %q counter drop comment "guest-input"
     }
     chain guest_forward {
         type filter hook forward priority -50; policy accept;
-        iifname %q counter drop
-        oifname %q counter drop
+        iifname %q counter drop comment "guest-egress"
+        oifname %q counter drop comment "guest-ingress"
     }
 }
 `, guestInterface, guestInterface, guestInterface), nil

@@ -3,7 +3,6 @@
 package enforce
 
 import (
-	"errors"
 	"strings"
 	"testing"
 )
@@ -18,7 +17,7 @@ func TestTimedFixturePolicyStartsClosed(t *testing.T) {
 		"flags timeout",
 		"iifname \"guest0\" oifname \"uplink0\" ip saddr @test_allow_v4 counter accept",
 		"iifname \"guest0\" counter drop",
-		"oifname \"guest0\" ip daddr @test_allow_v4 ct state established,related counter accept",
+		"iifname \"uplink0\" oifname \"guest0\" ip daddr @test_allow_v4 ct direction reply ct state established,related counter accept",
 		"oifname \"guest0\" counter drop",
 	} {
 		if !strings.Contains(rules, item) {
@@ -36,7 +35,7 @@ func TestTimedFixtureRejectsInterfaces(t *testing.T) {
 		{"guest0", "wan0;flush"}, {"bad interface", "wan0"},
 	} {
 		rules, err := RenderTimedFixturePolicy(tc[0], tc[1])
-		if !errors.Is(err, ErrGuestInterface) && err == nil || rules != "" {
+		if err == nil || rules != "" {
 			t.Fatalf("guest=%q uplink=%q rules=%q err=%v", tc[0], tc[1], rules, err)
 		}
 	}

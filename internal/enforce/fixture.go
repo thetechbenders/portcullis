@@ -25,15 +25,15 @@ func RenderTimedFixturePolicy(guest, uplink string) (string, error) {
     }
     chain guest_input {
         type filter hook input priority -50; policy accept;
-        iifname %q counter drop
+        iifname %q counter drop comment "guest-input"
     }
     chain guest_forward {
         type filter hook forward priority -50; policy accept;
         iifname %q oifname %q ip saddr @test_allow_v4 counter accept
         iifname %q counter drop
-        oifname %q ip daddr @test_allow_v4 ct state established,related counter accept
-        oifname %q counter drop
+        iifname %q oifname %q ip daddr @test_allow_v4 ct direction reply ct state established,related counter accept
+        oifname %q counter drop comment "guest-ingress"
     }
 }
-`, guest, guest, uplink, guest, guest, guest), nil
+`, guest, guest, uplink, guest, uplink, guest, guest), nil
 }
