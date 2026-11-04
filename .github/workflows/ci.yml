@@ -24,7 +24,9 @@ jobs:
       - name: Vet lab build tag
         run: go vet -tags netnslab ./...
       - name: Formatting
-        run: test -z "$(gofmt -l .)"
+        run: |
+          gofmt -d .
+          test -z "$(gofmt -l .)"
       - name: Script syntax
         run: bash -n tests/netns/run.sh && python3 -m py_compile tests/netns/tcp_fixture.py tests/netns/udp_probe.py tests/netns/udp_session.py tests/netns/udp_flood.py
   netns:
