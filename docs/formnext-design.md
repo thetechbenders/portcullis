@@ -104,7 +104,7 @@ Properties:
 - `drop` in any base chain is final, so other tables cannot re-admit a packet this
   guard drops. Bypass paths that skip the inet forward hook altogether (flowtables,
   netdev ingress/egress chains on the guest or uplink device, bridging the guest
-  interface, XDP) are attested separately and cause the controller to fail closed.
+  interface, XDP, or upper devices stacked on guest/uplink interfaces) are attested separately and cause the controller to fail closed.
 
 Element updates use one `nft -f -` transaction each. Refresh/delete use the
 idempotent `add … timeout 1s; delete …; add … timeout T` idiom because deleting an

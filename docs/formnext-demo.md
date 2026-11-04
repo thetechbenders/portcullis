@@ -66,7 +66,9 @@ The launcher prints three URLs:
 
 ## Fallback
 
-If the live lab cannot be started, run the automated end-to-end suite and show its
-log: `sudo bash tests/netns/e2e.sh /tmp/pc-bin`. Every check prints PASS/FAIL with
-the kernel counters it relied on. Record that run before the show as the offline
-fallback.
+Use the `e2e` job log from an exact-head GitHub Actions run as the offline
+fallback. The automated `tests/netns/e2e.sh` suite runs only on disposable
+GitHub-hosted runners, builds the real processes and fails if a prerequisite is
+missing. It requires directional kernel drop counters and delivered positive
+controls for packet-denial assertions. Record the successful run before the show;
+a packet-test recording does not establish browser UX acceptance.

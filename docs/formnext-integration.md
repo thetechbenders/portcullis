@@ -22,7 +22,7 @@ commits and draft status. No shared history was rewritten.
 | Guard | Exact ordered rules, hooks, priority, policy, sets and dormant-state verification; whole-ruleset scan rejects flowtables, ingress/egress chains and dup/fwd. |
 | Transactions | Both grant directions use one nft batch; deletion is idempotent; success requires readback. Runtime changes only set elements, never base chains. |
 | Conntrack | Original source and destination cleanup both attempted; failures are visible in events. Packet enforcement remains dependent on timed sets, not conntrack deletion. |
-| Restart / degraded | Start flushes inherited grants before sockets; reconcile removes stray authority; failures enter terminal degraded mode and configured link-down failsafe. Crash leaves existing grants until their kernel timeout. |
+| Restart / degraded | Start flushes inherited grants before sockets; reconcile removes stray authority; failures enter terminal degraded mode and isolate the link before attempting potentially slow grant/conntrack cleanup, with a separate deadline. Crash leaves existing grants until their kernel timeout. |
 | IPC | Root-owned runtime directory, root-only operator socket, peer-UID gated guest socket; no browser-provided identity. Guest socket mode 0666 relies on credential validation. |
 | MPTCP | Portal explicitly disables MPTCP; descriptor validation requires IPPROTO_TCP. |
 | HTTP | Allowed Host plus exact Origin, JSON/custom header and fetch metadata on mutation; strict bounded bodies; security headers; separate loopback operator service. Plain HTTP remains demo scope. |
@@ -49,7 +49,17 @@ Freshly executed on 2026-11-04 using the existing Go 1.26 toolchain:
 
 Race testing and both root namespace suites run on disposable GitHub-hosted
 Ubuntu 24.04 runners. Neither root suite is run on Hephaestus. Missing prerequisites
-are failures. Exact-head run links and results are recorded after CI completes.
+are failures. Initial exact-head validation: [run 41927677511](https://github.com/thetechbenders/portcullis/actions/runs/41927677511)
+for head `1833d43d79b1821aee696b18f7454c088a98ac42`: `test`, `netns`, and `e2e`
+all **success**, including the race detector. Job logs confirm all scenarios ran,
+including all six runtime/startup mutations and same-socket flow recovery.
+GitHub tested its PR merge ref with the Phase 3 base (already an ancestor).
+
+A subsequent source-review correction moves degraded-mode link isolation before
+cleanup and gives it a separate deadline; a regression test verifies isolation
+runs before a failing grant flush. The final exact-head CI result is maintained
+in [draft PR #8](https://github.com/thetechbenders/portcullis/pull/8), so recording
+validation does not create an untested documentation commit.
 
 ## New experimental gates
 

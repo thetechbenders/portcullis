@@ -239,7 +239,7 @@ mutation() {
   ctl snapshot > "$state/snapshot.json"
   if python3 - "$state/snapshot.json" <<'PY'
 import json,sys
-x=json.load(open(sys.argv[1])); assert x['snapshot']['enforcement']=='degraded',x
+x=json.load(open(sys.argv[1])); sys.exit(0 if x['snapshot']['enforcement']=='degraded' else 1)
 PY
   then break; fi
   sleep .1
