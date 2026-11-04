@@ -55,3 +55,28 @@ func TestRenderAllowsConventionalNames(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderReconcileDeny(t *testing.T) {
+	rules, err := RenderReconcileDeny("guest0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"flush chain inet portcullis_guard guest_input",
+		"flush chain inet portcullis_guard guest_forward",
+		"add rule inet portcullis_guard guest_input iifname \"guest0\" counter drop",
+		"add rule inet portcullis_guard guest_forward iifname \"guest0\" counter drop",
+		"add rule inet portcullis_guard guest_forward oifname \"guest0\" counter drop",
+	} {
+		if !strings.Contains(rules, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(rules, "delete table") || strings.Contains(rules, "add table") ||
+		strings.Contains(rules, "type filter hook") {
+		t.Fatal("reconciliation must never replace hooked base chains")
+	}
+	if _, err := RenderReconcileDeny("bad;command"); !errors.Is(err, ErrGuestInterface) {
+		t.Fatalf("invalid interface: %v", err)
+	}
+}

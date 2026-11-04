@@ -45,3 +45,23 @@ table inet portcullis_guard {
 }
 `, guestInterface, guestInterface, guestInterface), nil
 }
+
+// RenderReconcileDeny emits an in-place, single-batch rule replacement for
+// EXISTING persistent base chains. The kernel hook objects are not removed
+// and no new base chain is attached during reconciliation.
+//
+// This command deliberately fails closed if the table/chains are absent.
+// The separate RenderDenyBaseline bootstrap must only run while the guest
+// interface is administratively down and unexposed. No production installer
+// or ruleset owner is included in this package.
+func RenderReconcileDeny(guestInterface string) (string, error) {
+	if !safeInterface.MatchString(guestInterface) {
+		return "", ErrGuestInterface
+	}
+	return fmt.Sprintf(`flush chain inet portcullis_guard guest_input
+flush chain inet portcullis_guard guest_forward
+add rule inet portcullis_guard guest_input iifname %q counter drop comment "guest-input"
+add rule inet portcullis_guard guest_forward iifname %q counter drop comment "guest-egress"
+add rule inet portcullis_guard guest_forward oifname %q counter drop comment "guest-ingress"
+`, guestInterface, guestInterface, guestInterface), nil
+}
