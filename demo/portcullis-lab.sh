@@ -28,7 +28,7 @@ die() { echo "portcullis-lab: $*" >&2; exit 1; }
 need_root() { (( EUID == 0 )) || die "must run as root on a disposable demo machine"; }
 refuse_protected_host() {
   # Project rule: never run the lab on the production workstation.
-  if [[ "$(hostname)" == hephaestus && -z "${PORTCULLIS_LAB_ALLOW_THIS_HOST:-}" ]]; then
+  if [[ "$(hostname)" == hephaestus ]]; then
     die "refusing to run on hephaestus; use a disposable demo machine or VM"
   fi
 }
@@ -151,9 +151,10 @@ cmd_up() {
   ip netns exec $ns_gw "$state/bin/portcullisd" bootstrap -config "$state/portcullis.json"
   ip -n $ns_gw link set guest0 up
   start_controller
+  install -d -o 65534 -g 65534 -m 0755 "$state/portal-ready"
   start_bg portal ip netns exec $ns_gw setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs \
-    "$state/bin/portcullis-portal" -config "$state/portcullis.json" -ready-file "$state/portal.ready"
-  wait_file "$state/portal.ready"
+    "$state/bin/portcullis-portal" -config "$state/portcullis.json" -ready-file "$state/portal-ready/ready"
+  wait_file "$state/portal-ready/ready"
   # Demo destination web page, reachable only through a grant.
   install -d -m 0755 "$state/www"
   cat >"$state/www/index.html" <<'EOF'
@@ -203,6 +204,7 @@ cmd_down() {
   echo "lab removed"
 }
 
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 need_root
 refuse_protected_host
 case "${1:-}" in
@@ -215,3 +217,5 @@ case "${1:-}" in
   down) cmd_down ;;
   *) sed -n '2,20p' "$0"; exit 2 ;;
 esac
+
+fi
