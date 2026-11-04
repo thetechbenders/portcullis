@@ -23,6 +23,8 @@ server_pid=""
 client_pid=""
 udp_server_pid=""
 udp_client_pid=""
+flood_server_pid=""
+flood_client_pid=""
 cleanup() {
   local status=$?
   trap - EXIT
@@ -30,6 +32,8 @@ cleanup() {
   if [[ -n "$server_pid" ]]; then kill "$server_pid" 2>/dev/null || :; wait "$server_pid" 2>/dev/null || :; fi
   if [[ -n "$udp_server_pid" ]]; then kill "$udp_server_pid" 2>/dev/null || :; wait "$udp_server_pid" 2>/dev/null || :; fi
   if [[ -n "$udp_client_pid" ]]; then kill "$udp_client_pid" 2>/dev/null || :; wait "$udp_client_pid" 2>/dev/null || :; fi
+  if [[ -n "$flood_server_pid" ]]; then kill "$flood_server_pid" 2>/dev/null || :; wait "$flood_server_pid" 2>/dev/null || :; fi
+  if [[ -n "$flood_client_pid" ]]; then kill "$flood_client_pid" 2>/dev/null || :; wait "$flood_client_pid" 2>/dev/null || :; fi
   if (( status != 0 )); then
     echo "=== fixture diagnostics ===" >&2
     ip -n "$gw" addr show >&2 || :
@@ -226,6 +230,25 @@ for iteration in {1..30}; do ip netns exec "$gw" nft -f "$tmp/reconcile.nft"; do
 [[ "$(ip netns exec "$gw" nft -a list chain inet portcullis_guard guest_forward | head -n 2)" == "$forward_handle_before" ]] || fail "forward base chain replaced during reconcile"
 expect_drop portcullis_guard guest_forward guest-egress ip netns exec "$guest" ping -n -c 1 -W 2 198.18.0.2
 expect_drop portcullis_guard guest_forward guest-ingress ip netns exec "$wan" ping -n -c 1 -W 2 10.203.0.2
+
+echo "Stress testing persistent base-chain reconciliation under UDP flood"
+# A bounded stress test is empirical evidence, not a mathematical proof
+# of gap freedom on all kernels or offloaded packet paths.
+ip netns exec "$wan" python3 "$root/tests/netns/udp_flood.py" receive "$tmp/flood" &
+flood_server_pid="$!"
+wait_for_file "$tmp/flood.ready"
+ip netns exec "$guest" python3 "$root/tests/netns/udp_flood.py" send "$tmp/flood" &
+flood_client_pid="$!"
+for iteration in {1..350}; do ip netns exec "$gw" nft -f "$tmp/reconcile.nft"; done
+touch "$tmp/flood.stop"
+wait "$flood_client_pid" || fail "UDP stress sender failed"
+flood_client_pid=""
+wait "$flood_server_pid" || fail "UDP stress receiver failed"
+flood_server_pid=""
+sent="$(cat "$tmp/flood.sent")"
+received="$(cat "$tmp/flood.received")"
+(( sent > 1000 )) || fail "stress sent too few packets: $sent"
+(( received == 0 )) || fail "reconcile leaked $received of $sent UDP packets"
 
 echo "Checking atomic policy convergence with existing rules and stale permits"
 # Reapplying must not append duplicate chains or rules.
