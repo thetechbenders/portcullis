@@ -1,18 +1,18 @@
-# Validation contract
+# Validation evidence and limitations
 
-## Available now
+## Current hosted test contract
 
-`go test ./...` covers issuance, IDs, input limits, duplicate active client labels, maximum store capacity, expiry boundary, lookup, revocation (including expired-but-present records), volatile-store restart semantics, and pruning. Concurrent operations are exercised against the store, and `go test -race ./...` instruments those paths for data races. `go vet ./...` performs static checks. These results do NOT establish real network access control, reliable identity binding, persistence, clock-reset safety, or kernel firewall behavior.
+- Go tests, race detector, vet, tagged lab vet and formatting.
+- Disposable Linux namespaces: guest, gateway, WAN and protected LAN with virtual Ethernet only.
+- nftables syntax/load and explicit **rule-labelled** guest INPUT/FORWARD counters.
+- One-way UDP probes and intentional wrong-interface mutations for both FORWARD directions.
+- Bootstrap behavior checked in an **isolated namespace** with guest0 administratively up; these tests do not establish that bootstrap is safe on a live guest interface. Repeated **in-place**, same-hook-chain reconciliation is tested separately.
+- Bounded UDP flood during hundreds of in-place reconciliations. Zero observed deliveries is an empirical condition, not a formal no-gap guarantee.
+- Parser and kernel-side transaction failure distinction; kernel EEXIST failure should preserve existing deny.
+- Test-only IPv4 grants expire in kernel; TCP and UDP receive-path checks exercise blocked forwarding and reply delivery after revocation/expiry, with positive recovery controls.
 
-## Required before any real guest network
+## Still unverified or excluded
 
-- Linux namespace packet tests with guest, uplink, portal and internal network simulators, without host production network changes.
-- Verify default-deny INPUT and FORWARD survive controller crash/restart and reboots; kernel timeouts must bound permitted packet flow independently.
-- Verify expiry and revocation on established TCP/UDP flows, with conntrack cleanup; prohibit a broad established-flow bypass.
-- Verify real network identity binding and reassignment, spoofed MAC/IP, alternate DNS, static routing, IPv6/link-local and trusted/VPN network bypasses.
-- Validate interface-scoped DHCP/DNS, local portal access, limited preauth recursion, and no arbitrary HTTPS interception.
-- Verify guest cannot access host services, switch/AP administration, trusted LAN or guest peers.
-- Test firewall transaction failure, restart, clock jumps, suspend/resume, stale grants and reconciliation.
-- Audit existing nftables rule interactions before integrating with production host; prove independent console/controller recovery, backup and rollback.
+Production installation, reboot/reload persistence, crash recovery, physical network interface identity, bridge/flowtable/tc/XDP paths, local host OUTPUT, AP isolation, trusted client identity, accurate lease-to-kernel mapping, real conntrack cleanup, privileged IPC, captive portal and DHCP/DNS are not implemented.
 
-No hardware or production gateway tests have been run.
+Bootstrap whole-table replacement **does** admit a narrow possible kernel packet gap and must never be treated as an online reconciler. In-place replacement holds the base chains, but its limited flood test does not certify every kernel implementation or path. No live network has been tested.

@@ -1,28 +1,33 @@
 # Portcullis
 
-An independent, open-source Linux captive-portal gateway for self-hosted guest access. This repository is at **Phase 1 foundation**, not a functioning gateway.
+Self-hosted, open-source Linux captive-portal gateway project. **Not a deployable guest gateway.**
 
 ## Status
 
-Implemented: a small standard-library Go package for bounded, volatile guest lease decision records (up to fifteen minutes, one active record per client label, maximum 1,024 records), with unit and concurrency tests.
+**Phase 1 merged:** bounded, volatile 15-minute Go lease decision records, including concurrency tests.
 
-**Not implemented:** verified network client identity, captive portal, packet enforcement, DHCP/DNS, nftables integration, persistent configuration, dashboard, and payments. The lease ID is a bearer secret, not authorization to route packets. Nothing here should be deployed to protect a network.
+**Phase 2 PR (ready for review):** nftables policy text rendering, an explicit **bootstrap** batch for use only when guest networking is not exposed, a separate **in-place reconciliation** batch for pre-existing hooked base chains, and an isolated four-namespace packet lab. The standard policy CLI never executes nftables.
 
-## Build and test
+The lab checks IPv4/IPv6 guest INPUT and bidirectional FORWARD filtering, per-rule drop counters, one-way UDP probes and deliberate broken-rule mutations. It also exercises kernel timeout sets, existing TCP revocation/recovery, established UDP **inbound** revocation/expiry/recovery, and a bounded UDP flood during repeated in-place reconciliation. All test-only source-IP grants remain in the `netnslab` build-tagged binary and test table.
 
-Requires Go 1.26 or newer.
+**Warning:** full-table bootstrap/replacement can leak packets across base-chain hook generation changes, even though its resulting state and rollback semantics are atomic. **Never apply the bootstrap to an active guest interface or use it for live reconciliation.** The in-place reconciler maintains existing base-chain hooks, but lab stress results do not prove gap freedom for every kernel, topology, or hardware offload path.
+
+**Not implemented:** production firewall installer and boot/reload ownership, verified network identity, bridge/flowtable/tc/XDP checks, trusted grant lifecycle, conntrack cleanup, privileged controller and IPC, captive portal, DHCP/DNS, UI, payment system or physical network integration.
+
+## Checks
+
+Go 1.26 or newer:
 
 ```sh
 go test ./...
 go test -race ./...
 go vet ./...
+go vet -tags netnslab ./...
 test -z "$(gofmt -l .)"
 ```
 
-## Architecture and development
-
-See [docs/architecture.md](docs/architecture.md) and [docs/validation.md](docs/validation.md). The intended deployment uses a Linux mini-PC, managed VLAN-capable switch, and guest access point, subject to site-specific inventory and recovery testing. No scripts in this repository modify host networking.
+Disposable GitHub Actions runners additionally build the policy commands and run root-required nftables packet tests. See [tests/netns/README.md](tests/netns/README.md), [docs/phase2.md](docs/phase2.md) and [docs/validation.md](docs/validation.md).
 
 ## Licensing
 
-GNU Affero General Public License v3.0. See [LICENSE](LICENSE).
+AGPL-3.0. See [LICENSE](LICENSE).
