@@ -1,31 +1,23 @@
-# Disposable Linux network namespace lab
+# Disposable network namespace integration tests
 
-Four isolated namespaces simulate a guest, gateway, upstream endpoint and protected LAN using veth devices and private routes. The script loads nftables policies only inside the disposable gateway namespace. It requires root and is intended **only for a GitHub-hosted ephemeral runner or disposable VM**, never a live gateway.
-
-## Build
+**Root required, disposable GitHub-hosted runner or VM only. Never run against Hephaestus or a production gateway.**
 
 ```sh
 go build -o /tmp/portcullis-policy ./cmd/portcullis-policy
 go build -tags netnslab -o /tmp/portcullis-lab-policy ./tests/netns/policy
-go test -tags netnslab ./internal/enforce
 sudo bash tests/netns/run.sh /tmp/portcullis-policy /tmp/portcullis-lab-policy
 ```
 
-Dependencies: Go 1.26+, nftables, iproute2, iputils-ping, Python 3, root and Linux network namespaces. Hosted CI uses `ubuntu-24.04` with a ten-minute job limit.
+Dependencies: nftables, iproute2, iputils-ping, Python 3, Go 1.26+, Linux network namespaces. The CI `netns` job runs on a disposable Ubuntu 24.04 runner.
 
-## Evidence produced
+The lab creates only veth links in guest, gateway, protected LAN, and upstream namespaces, changes forwarding sysctls only inside the gateway namespace, and traps cleanup. Test probes are deliberately strict:
 
-- Before installing a firewall, prove guest-to-gateway and guest-to-WAN/LAN IPv4/IPv6 routing, plus WAN/LAN-to-guest routing.
-- Pin IPv6 gateway neighbor mapping so loss of neighbor discovery cannot masquerade as a successful FORWARD denial.
-- Apply the baseline, then verify direction-labelled drops and independent one-way UDP delivery. These new assertions and deliberate wrong-interface mutations must pass their own hosted CI gate.
-- Apply the same baseline a second time; assert no duplicate rules. Insert intentionally unsafe broad permits *only inside the lab*, prove they bypass the current rules, then atomically reapply the baseline and assert the permit is gone in both directions.
-- Submit a kernel-rejected (duplicate-object) batch and verify the existing deny remains effective; unlike a syntax error, this tests kernel transaction rollback.
-- Replace the disposable lab table in a single nft transaction with a build-tagged source-IP timeout-set fixture. Prove its empty set starts closed, controlled guest-to-WAN grants work and unrelated/reverse/IPv6 paths remain denied.
-- Revoke a grant during an existing TCP exchange, verify a receive timeout, server liveness, no second payload receipt and correct drop counter, and prove recovery of the same socket when a test grant returns.
-- Verify a separate short kernel set timeout denies new packets after expiry.
+- Positive connectivity controls before firewall application
+- IPv4/IPv6 and one-way UDP guest-denial assertions with direction-labelled nft counters
+- Broken-interface mutations that must reveal leaks
+- Separate first-install bootstrap and deny-only in-place rule reconciliation, including repeated updates
+- Controlled high-rate UDP flood with a delivery counter during in-place reconciliation
+- Kernel error rollback, stale-permit cleanup, timed test grants, TCP blocked delivery and recovery
+- UDP flow established by the guest, then **server-to-guest** data attempted after grant deletion and kernel expiry; a drop-counter delta, receive timeout and same-socket recovery are required
 
-All operations occur in temporary namespaces, with trap cleanup and diagnostics on errors.
-
-## Limitations
-
-The intentionally unsafe test grant is not trusted client identity. This lab does not test physical bridging, AP management, flowtables, boot persistence, conntrack cleanup, production nftables ownership, DHCP/DNS, or the captive portal. A demo table replacement transaction is not authority to install any rule on a non-disposable host.
+The `netnslab` grant is spoofable by source IP and never represents production identity. The bootstrap batch is known to have a possible packet-straddle gap and must only be used while guest networking is physically/administratively closed. No host-global policy is modified.

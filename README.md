@@ -1,34 +1,33 @@
 # Portcullis
 
-An independent, open-source Linux captive-portal gateway for self-hosted guest access. This repository is **not yet a deployable gateway**.
+Self-hosted, open-source Linux captive-portal gateway project. **Not a deployable guest gateway.**
 
 ## Status
 
-**Phase 1 merged:** bounded, volatile Go lease records (maximum fifteen minutes, one active record per client label, maximum 1,024 records) with unit and concurrency tests.
+**Phase 1 merged:** bounded, volatile 15-minute Go lease decision records, including concurrency tests.
 
-**Phase 2 draft PR:** a pure Go generator for a guest firewall deny baseline and a disposable four-namespace Linux packet-testing lab. The policy now filters forwarded traffic in **both directions** and emits a convergent nftables table-replacement batch, but base-chain replacement has an observed packet-straddle window and is NOT safe as a live reconciler. The lab verifies removal of injected stale permits, rejects a deliberately invalid transaction without losing the active deny, and tests IPv4/IPv6 ingress, egress, test grants, kernel expiry, and established TCP revocation. Its unsafe source-IP authorization fixture is confined to a separately built `netnslab` binary and table.
+**Phase 2 draft PR:** nftables policy text rendering, an explicit **bootstrap** batch for use only when guest networking is not exposed, a separate **in-place reconciliation** batch for pre-existing hooked base chains, and an isolated four-namespace packet lab. The standard policy CLI never executes nftables.
 
-**Not implemented:** production firewall installation or ownership; host-to-guest OUTPUT policy; trusted network identity; reload/boot persistence; flowtable/bridge bypass detection; conntrack cleanup; privileged controller and IPC; captive portal; DHCP/DNS; dashboard; payments.
+The lab checks IPv4/IPv6 guest INPUT and bidirectional FORWARD filtering, per-rule drop counters, one-way UDP probes and deliberate broken-rule mutations. It also exercises kernel timeout sets, existing TCP revocation/recovery, established UDP **inbound** revocation/expiry/recovery, and a bounded UDP flood during repeated in-place reconciliation. All test-only source-IP grants remain in the `netnslab` build-tagged binary and test table.
 
-The baseline generator emits nftables text only. It is not a safe deployment tool. Do not run these policies against a live guest network.
+**Warning:** full-table bootstrap/replacement can leak packets across base-chain hook generation changes, even though its resulting state and rollback semantics are atomic. **Never apply the bootstrap to an active guest interface or use it for live reconciliation.** The in-place reconciler maintains existing base-chain hooks, but lab stress results do not prove gap freedom for every kernel, topology, or hardware offload path.
 
-## Build and test
+**Not implemented:** production firewall installer and boot/reload ownership, verified network identity, bridge/flowtable/tc/XDP checks, trusted grant lifecycle, conntrack cleanup, privileged controller and IPC, captive portal, DHCP/DNS, UI, payment system or physical network integration.
 
-Requires Go 1.26 or newer.
+## Checks
+
+Go 1.26 or newer:
 
 ```sh
 go test ./...
 go test -race ./...
 go vet ./...
+go vet -tags netnslab ./...
 test -z "$(gofmt -l .)"
 ```
 
-Packet tests are run only on disposable GitHub-hosted runners. See [tests/netns/README.md](tests/netns/README.md).
-
-## Architecture
-
-See [docs/architecture.md](docs/architecture.md), [docs/phase2.md](docs/phase2.md), and [docs/validation.md](docs/validation.md). Intended hardware includes a Linux gateway, VLAN-capable switch, and guest AP. No real networking has been configured.
+Disposable GitHub Actions runners additionally build the policy commands and run root-required nftables packet tests. See [tests/netns/README.md](tests/netns/README.md), [docs/phase2.md](docs/phase2.md) and [docs/validation.md](docs/validation.md).
 
 ## Licensing
 
-GNU Affero General Public License v3.0. See [LICENSE](LICENSE).
+AGPL-3.0. See [LICENSE](LICENSE).

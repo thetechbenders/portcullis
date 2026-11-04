@@ -1,21 +1,18 @@
-# Validation contract
+# Validation evidence and limitations
 
-## Verified on disposable hosted Linux
+## Current hosted test contract
 
-Go checks include `go test ./...`, `go test -race ./...`, `go vet ./...`, formatting and separate `netnslab` build-tagged fixture tests.
+- Go tests, race detector, vet, tagged lab vet and formatting.
+- Disposable Linux namespaces: guest, gateway, WAN and protected LAN with virtual Ethernet only.
+- nftables syntax/load and explicit **rule-labelled** guest INPUT/FORWARD counters.
+- One-way UDP probes and intentional wrong-interface mutations for both FORWARD directions.
+- Bootstrap validation with interface closed in the lab, followed by repeated **in-place**, same-hook-chain deny reconciliation.
+- Bounded UDP flood during hundreds of in-place reconciliations. Zero observed deliveries is an empirical condition, not a formal no-gap guarantee.
+- Parser and kernel-side transaction failure distinction; kernel EEXIST failure should preserve existing deny.
+- Test-only IPv4 grants expire in kernel; TCP and UDP receive-path checks prove forward/reverse packet denial following revocation/expiry with positive recovery controls.
 
-Earlier CI used aggregate FORWARD counters and allowed two broken-direction mutations to pass. The current branch changes the oracle to per-rule comments and one-way UDP delivery tests; mark these changes verified only after exact-head CI succeeds. Both WAN and protected-LAN sources are denied from reaching the guest under the baseline. It additionally tests existing-table reapplication, removing injected broad grant rules, rejecting a parser-error batch without losing deny (the current branch changes this to a kernel-side failure test), and restoring the exact intended rule count.
+## Still unverified or excluded
 
-The deliberately unsafe test-only grant checks bounded IPv4 guest-to-upstream forwarding, controlled established replies, kernel expiration, TCP blocked delivery on revocation and same-socket recovery on test regrant. The server liveness and nft counters prevent treating an unrelated dead TCP server as a successful firewall revocation.
+Production installation, reboot/reload persistence, crash recovery, physical network interface identity, bridge/flowtable/tc/XDP paths, local host OUTPUT, AP isolation, trusted client identity, accurate lease-to-kernel mapping, real conntrack cleanup, privileged IPC, captive portal and DHCP/DNS are not implemented.
 
-## Not established for production
-
-- Zero-packet-leak live reconciliation: a burst test reproduced a small exposure during base-chain replacement, despite atomic batch rollback.\n- Persistent deny under real system boot, firewall reload/flush and daemon failures.
-- Verified guest interface identity and parent, bridge VLAN topology, flowtable/offload/tc/XDP bypass protection.
-- Host-initiated OUTPUT to a guest and AP-local traffic isolation.
-- Trusted attachment identity, client anti-spoofing and address reassignment.
-- Authenticated privileged controller, safe allow-set operations and real conntrack deletion.
-- DHCP/DNS, captive portal preauthorization, management access and physical equipment isolation.
-- UDP session/revocation tests and expiry of an established stream (distinct from new packet timeout tests).
-
-No real network has been modified and the rendered batch is not an approved deployment mechanism.
+Bootstrap whole-table replacement **does** admit a narrow possible kernel packet gap and must never be treated as an online reconciler. In-place replacement holds the base chains, but its limited flood test does not certify every kernel implementation or path. No live network has been tested.
