@@ -43,6 +43,26 @@ func TestParseLabConfig(t *testing.T) {
 	}
 }
 
+// JSON omission has the same unsafe zero value as explicit false.
+func TestParseRejectsMissingFailsafe(t *testing.T) {
+	raw, err := json.Marshal(labFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	delete(fields, "failsafe_link_down")
+	raw, err = json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(raw); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("missing mandatory failsafe accepted: %v", err)
+	}
+}
+
 func TestParseRejectsUnknownAndTrailing(t *testing.T) {
 	raw, _ := json.Marshal(labFile())
 	for name, input := range map[string]string{
@@ -60,6 +80,7 @@ func TestParseRejectsUnknownAndTrailing(t *testing.T) {
 func TestValidateRejectsUnsafeTopology(t *testing.T) {
 	cases := map[string]func(*File){
 		"same interfaces":      func(f *File) { f.UplinkInterface = f.GuestInterface },
+		"failsafe disabled":    func(f *File) { f.FailsafeLinkDown = false },
 		"interface injection":  func(f *File) { f.GuestInterface = "guest0;flush" },
 		"gateway outside":      func(f *File) { f.GatewayV4 = "10.9.0.1" },
 		"gateway is network":   func(f *File) { f.GatewayV4 = "10.203.0.0" },

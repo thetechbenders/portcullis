@@ -77,6 +77,7 @@ type File struct {
 	NFTPath               string            `json:"nft_path"`
 	ConntrackPath         string            `json:"conntrack_path"`
 	IPPath                string            `json:"ip_path"`
+	// Mandatory: omitted and false configurations are rejected.
 	FailsafeLinkDown      bool              `json:"failsafe_link_down"`
 }
 
@@ -108,8 +109,8 @@ type Config struct {
 	NFTPath        string
 	ConntrackPath  string
 	IPPath         string
-	// FailsafeLinkDown sets the guest interface administratively down when
-	// the guard cannot be attested at runtime.
+	// FailsafeLinkDown must be true. It requests guest-link isolation
+	// before cleanup when guard attestation fails.
 	FailsafeLinkDown bool
 }
 
@@ -151,7 +152,12 @@ func invalid(format string, args ...any) error {
 
 // Validate converts the file schema into a typed Config.
 func (f File) Validate() (*Config, error) {
-	c := &Config{FailsafeLinkDown: f.FailsafeLinkDown}
+	// A missing/dormant guard may accept packets even when API grants are
+	// refused. A guest-link failsafe is mandatory for this gateway profile.
+	if !f.FailsafeLinkDown {
+		return nil, invalid("failsafe_link_down must be true for guest-link isolation")
+	}
+	c := &Config{FailsafeLinkDown: true}
 	if !safeInterface.MatchString(f.GuestInterface) || !safeInterface.MatchString(f.UplinkInterface) {
 		return nil, invalid("interface names must be 1-15 safe ASCII bytes")
 	}

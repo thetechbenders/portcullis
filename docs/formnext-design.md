@@ -125,8 +125,9 @@ absent element fails the whole batch. A grant updates `granted_v4` and
    kernel elements, delete stray/untimed/over-long elements, mark grants whose
    elements vanished as ended (they are **never** re-added), refresh the operator
    snapshot. Attestation failure enters `degraded`: grants are flushed when
-   possible, every request is refused, and with `failsafe_link_down` the guest
-   interface is set administratively down. Degraded persists until restart.
+   possible, every request is refused, and the guest interface is taken administratively down before grant cleanup.
+   Both missing and false `failsafe_link_down` configurations are rejected; degraded
+   status alone does not prove isolation if the link command itself fails. Degraded persists until restart.
 5. A crash leaves the guard and any granted elements in place; each grant still
    expires in the kernel at its timeout, at most 15 minutes after issue. No new
    authority can be created without a running controller.

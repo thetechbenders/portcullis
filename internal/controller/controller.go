@@ -95,12 +95,12 @@ type Config struct {
 	MaxEvents          int
 }
 
-// Deps are the injected collaborators. Failsafe may be nil.
+// Deps are the injected collaborators. Failsafe is mandatory.
 type Deps struct {
 	Kernel   Kernel
 	Flows    Flows
 	Evidence Evidence
-	Failsafe Failsafe
+	Failsafe Failsafe // required for guest-link isolation on guard failure
 	Now      func() time.Time
 	Log      *slog.Logger
 }
@@ -187,8 +187,8 @@ func New(cfg Config, deps Deps) (*Controller, error) {
 	if cfg.MaxEvents < 1 || cfg.MaxEvents > 4096 {
 		return nil, bad("max events must be between 1 and 4096")
 	}
-	if deps.Kernel == nil || deps.Flows == nil || deps.Evidence == nil {
-		return nil, bad("kernel, flows and evidence dependencies are required")
+	if deps.Kernel == nil || deps.Flows == nil || deps.Evidence == nil || deps.Failsafe == nil {
+		return nil, bad("kernel, flows, evidence and failsafe dependencies are required")
 	}
 	if deps.Now == nil {
 		deps.Now = time.Now

@@ -98,6 +98,22 @@ chown 65534:65534 "$state/portal-ready"
 install -m 755 "$bindir/portcullisd" "$bindir/portcullis-portal" "$bindir/portcullisctl" "$state/bin/"
 write_config
 build_topology
+# SEC-001: the privileged gateway cannot bootstrap or run with isolation
+# disabled. This checks real config loading, not only unit-level validation.
+python3 - "$state/portcullis.json" "$state/unsafe-no-failsafe.json" <<'PY'
+import json,sys
+with open(sys.argv[1]) as f:
+    cfg = json.load(f)
+cfg["failsafe_link_down"] = False
+with open(sys.argv[2], "w") as f:
+    json.dump(cfg, f)
+PY
+if gw "$state/bin/portcullisd" bootstrap -config "$state/unsafe-no-failsafe.json"; then
+  die 'disabled failsafe accepted by bootstrap'
+fi
+if gw "$state/bin/portcullisd" run -config "$state/unsafe-no-failsafe.json"; then
+  die 'disabled failsafe accepted by controller run'
+fi
 # Temporary static fixture addresses prove every negative packet path before
 # installing the guard. DHCP replaces them below and is required to succeed.
 ip -n "$ns_a" addr add 10.203.0.100/24 dev eth0

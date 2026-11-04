@@ -96,3 +96,7 @@ requires a fresh complete CI run; the failed check is not treated as acceptance.
 
 Fresh local fuzzing on 2026-11-04 passed: `FuzzRespond` for 15s (550542 executions)
 and `FuzzParseRequest` for 15s (409395 executions), each with two workers.
+
+## SEC-001: mandatory isolation on guard failure
+
+The Formnext controller now rejects disabled or omitted `failsafe_link_down` in configuration, rejects a missing controller failsafe dependency, and always wires the real guest-link isolation handler. The disposable e2e harness additionally attempts both privileged startup modes using an explicitly disabled failsafe and requires rejection. Existing mutation tests require the guest interface to be administratively DOWN after guard damage. This eliminates the configuration bypass, but does not make isolation infallible: an unsuccessful kernel `ip link set down` operation leaves physical isolation **unconfirmed**, even though degraded mode is entered and grants are flushed when possible. Track explicit isolation confirmation separately before any physical-network use.

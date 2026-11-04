@@ -18,10 +18,12 @@ The lab checks IPv4/IPv6 guest INPUT and bidirectional FORWARD filtering, per-ru
 
 A disposable-namespace demonstration of the whole guest journey is integrated on top of the Phase 3 attestor. [Integration evidence and review limits](docs/formnext-integration.md) track the original handoff, security corrections and exact-head CI. [PR #8](https://github.com/thetechbenders/portcullis/pull/8) remains draft and unmerged pending review. See [docs/formnext-design.md](docs/formnext-design.md) for the contract and trust boundaries, and [docs/formnext-demo.md](docs/formnext-demo.md) for the booth runbook.
 
-- `portcullisd` (privileged): installs the persistent guard only while the guest link is down; attests it, bypass paths and topology before serving; built-in DHCPv4 server as the identity source; timed kernel grant elements; revoke-all on start; degraded fail-closed mode with optional guest link-down.
+- `portcullisd` (privileged): installs the persistent guard only while the guest link is down; attests it, bypass paths and topology before serving; built-in DHCPv4 server as the identity source; timed kernel grant elements; revoke-all on start; degraded mode with **mandatory guest-link isolation** before grant cleanup.
 - `portcullis-portal` (unprivileged): guest HTTP portal and static non-recursive DNS on the gateway guest address only. It passes each guest TCP socket to the controller, which derives identity from the kernel, never from the browser.
 - `portcullisctl`: operator snapshot, revoke and reset over a root-only socket, plus a loopback dashboard.
 - `demo/portcullis-lab.sh`: interactive namespace lab for the show (refuses to run on hephaestus).
+
+**Required failsafe setting:** `failsafe_link_down: true`. The gateway refuses configurations that disable or omit this field, and the controller refuses to construct without an isolation dependency. If guard attestation fails, it attempts to bring the guest interface administratively down *before* removing authorization. A failed `ip link set down` is logged but **does not prove isolation**; degraded is not synonymous with physically isolated. The Formnext deployment remains confined to a disposable, controlled network. An independent isolation mechanism and explicit isolation-status evidence are required before production use.
 
 **Demo trust limit:** identity is (guest interface, gateway-issued DHCP address, Ethernet address), enforced by kernel `ip saddr . ether saddr` matching. A station that clones another guest's MAC *and* IP on the same segment shares that guest's access; the access layer must bind stations (WPA2/3 with client isolation).
 

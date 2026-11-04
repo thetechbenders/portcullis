@@ -17,7 +17,7 @@ import (
 )
 
 func TestNewValidation(t *testing.T) {
-	deps := Deps{Kernel: newFakeKernel(&fakeClock{}), Flows: &fakeFlows{}, Evidence: &fakeEvidence{}}
+	deps := Deps{Kernel: newFakeKernel(&fakeClock{}), Flows: &fakeFlows{}, Evidence: &fakeEvidence{}, Failsafe: &fakeFailsafe{}}
 	for name, mutate := range map[string]func(*Config){
 		"ipv6 subnet":        func(c *Config) { c.GuestSubnet = netip.MustParsePrefix("fd00::/64") },
 		"uncanonical subnet": func(c *Config) { c.GuestSubnet = netip.MustParsePrefix("10.203.0.5/24") },
@@ -40,6 +40,9 @@ func TestNewValidation(t *testing.T) {
 	}
 	if _, err := New(testConfig(), Deps{Flows: &fakeFlows{}, Evidence: &fakeEvidence{}}); !errors.Is(err, ErrConfig) {
 		t.Errorf("missing kernel accepted: %v", err)
+	}
+	if _, err := New(testConfig(), Deps{Kernel: deps.Kernel, Flows: deps.Flows, Evidence: deps.Evidence}); !errors.Is(err, ErrConfig) {
+		t.Errorf("missing guest-link failsafe accepted: %v", err)
 	}
 	if _, err := New(testConfig(), deps); err != nil {
 		t.Fatal(err)

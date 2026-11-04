@@ -118,9 +118,9 @@ func run(ctx context.Context, cfg *config.Config, k *gateway.Kernel, flows gatew
 		Now:      time.Now,
 		Log:      log,
 	}
-	if cfg.FailsafeLinkDown {
-		deps.Failsafe = gateway.LinkFailsafe{Link: k.Link, Interface: cfg.GuestInterface}
-	}
+	// Config validation requires isolation. Wire the mechanism regardless
+	// of future optional settings so it cannot silently disappear.
+	deps.Failsafe = gateway.LinkFailsafe{Link: k.Link, Interface: cfg.GuestInterface}
 	ctrl, err := controller.New(controller.Config{
 		GuestSubnet:        cfg.GuestSubnetV4,
 		Gateway:            cfg.GatewayV4,
