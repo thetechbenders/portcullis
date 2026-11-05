@@ -1,0 +1,27 @@
+name: Read-only gofmt handoff
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  format-handoff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Emit formatted source data
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=(cmd/portcullis-host/*.go internal/hostpreflight/*.go)
+          gofmt -w "${files[@]}"
+          for f in "${files[@]}"; do
+            printf 'PORTCULLIS_FMT_V3|%s|' "$f"
+            base64 -w0 "$f"
+            printf '\n'
+          done
