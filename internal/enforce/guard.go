@@ -187,7 +187,7 @@ func guardRules(c GuardConfig) []guardRule {
 	}
 	return []guardRule{
 		{chainInput, "guest-dhcp", []guardTerm{guestIn, nfproto, termPort("udp", "sport", 68), termPort("udp", "dport", 67)}, "accept"},
-		{chainInput, "guest-dns", []guardTerm{guestIn, toGateway, termSourcePair(SetBound), termPort("udp", "dport", c.DNSPort)}, "accept"},
+		{chainInput, "guest-dns", []guardTerm{guestIn, toGateway, termSourcePair(SetBound), termPort("udp", "dport", c.DNSPort), original}, "accept"},
 		{chainInput, "guest-portal", []guardTerm{guestIn, toGateway, termSourcePair(SetBound), termPort("tcp", "dport", c.PortalPort), original}, "accept"},
 		{chainInput, "guest-input", []guardTerm{guestIn}, "drop"},
 		{chainForward, "guest-protected", []guardTerm{guestIn, termProtected(c.Protected)}, "drop"},

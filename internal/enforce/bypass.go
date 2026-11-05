@@ -2,7 +2,11 @@ package enforce
 
 import "fmt"
 
-// VerifyNoBypass attests "nft -j list ruleset" output. It rejects packet
+// VerifyNoBypass attests only nft-visible rules from "nft -j list ruleset".
+// It cannot inspect iptables-legacy rules loaded through the legacy kernel
+// API. Before deploying the disposable demo, verify legacy tables contain
+// no non-default rules and that no other packet managers are active.
+// It rejects packet
 // paths that skip the inet forward hook the guard relies on: flowtables
 // (fast-path offload), any ingress/egress base chain in any family (nft
 // 1.0.9 JSON does not show a netdev chain's device, so all are rejected),

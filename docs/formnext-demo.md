@@ -90,3 +90,16 @@ controls. The disposable CI now includes a headless Chrome portal render alongsi
 real HTTP portal and dashboard API acceptance. Manual browser/dashboard
 rehearsal on the disposable Formnext VM remains a separate acceptance step:
 headless tests do not prove the physical demo environment or full operator UX.
+
+## Disposable VM pre-flight: coexistence checks
+
+The bypass attestor examines the **nft-visible** ruleset, not separate
+iptables-legacy kernel tables. Before starting the demo on the disposable VM,
+inspect `sudo iptables-legacy-save` (and `ip6tables-legacy-save`) and verify
+that no active legacy rules/chains can redirect or forward guest packets.
+Stop Docker, firewalld and any other packet-management services in this
+**disposable environment** before bootstrapping. The verifier deliberately
+rejects nft-visible xt targets, including common Docker NAT targets, rather
+than trying to reason around them. Confirm the Portcullis guard and full
+ruleset both attest successfully before opening guest access.
+Do not make these changes to a workstation, home router or production host.
