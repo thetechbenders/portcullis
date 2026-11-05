@@ -64,21 +64,21 @@ The eventual `portcullis-host preflight --dry-run` should produce a bounded, red
 - Physical NIC identity: name, permanent/current MAC, interface index, sysfs device path, driver, carrier, master/uppers, expected link peer if independently known, NetworkManager/systemd-networkd ownership.
 - All IPv4/IPv6 addresses, routes, rules, DHCP clients, forwarding sysctls, RA/DHCPv6, expected guest/uplink/management CIDRs, collision with localhost, private/protected, link-local, CGNAT and VPN destinations.
 - Entire effective nftables base-chain/flowtable inventory and compatibility with legacy iptables, Docker/firewalld, tc, XDP, VLAN/bridge/macvlan/ipvlan and hardware acceleration. Unknown or opaque forwarding paths fail preflight.
-- Named management recovery method and independent guest exposure gate; positive readback of management reachability must not be inferred solely from `wlan0 UP`.
+- Named management recovery method and explicit supervised-disconnect procedure; any future external gate must have independently reviewable state evidence. Management reachability is not proven by `wlan0 UP`.
 - No secrets in evidence: redact tokens, Wi-Fi PSKs, SSH material and raw guest payloads. Write output with restricted permissions.
 
 The inventory is not proof of future isolation. Any change in links, firewall ownership or policy versions invalidates the authorization to expose the guest interface.
 
 ## Conceptual boot and shutdown protocol (not runnable units)
 
-1. **Cold/power-loss start:** Independent guest exposure gate remains OFF. Management remains under its existing owner; Portcullis takes no management interface actions. A missing or failed prerequisite leaves the gate OFF. Software cannot guarantee pre-userspace link isolation unless external gating or physical disconnection provides it.
-2. **Preflight:** Resolve pinned physical interfaces and address plan; reject any drift, collision, unexpected manager, forwarding path, insecure neighbor route, schema mismatch, or absent independent isolation mechanism.
+1. **Cold/power-loss start:** The guest cable is disconnected for the first pilot. For later unattended operation, the guest must be excluded from automatic network-manager ownership while a versioned early-boot one-shot installs the nftables guard afresh before device activation. Any missing or failed prerequisite forbids exposure. Management remains under its existing owner.
+2. **Preflight:** Resolve pinned physical interfaces and address plan; reject drift, collision, unexpected manager, forwarding path, insecure neighbor route, schema mismatch or unverified control of guest exposure. Read-only inventory must not claim attestation.
 3. **Guard installation:** While guest is physically isolated and administratively DOWN, bootstrap the guard **only if it is absent**, then read back exact hook/policy/set structure and full bypass/topology attestation. An existing unfamiliar table is an error; do not flush/replace it.
 4. **Controller startup:** Attest, revoke inherited grants, confirm absence of authorization and start the controller/portal. Readiness must mean verified kernel state **and** live restricted services, not merely process start or PID file creation.
-5. **Operator-controlled exposure:** Only with positive, independent evidence and explicit test approval may the adapter enable the nominated guest link (and later an external port gate). After exposure, monitor guard, link, ownership and gateway state; any uncertainty makes the state `isolation_unconfirmed` and denies further grants.
+5. **Operator-controlled exposure:** Only after verified guard hooks, trusted manager ownership, time-bounded operator authorization and explicit test approval may activation enable the pinned guest link. For the first wired pilot the operator manually connects the guest cable. Any drift revokes future grants and must be reported without claiming isolation was automatically confirmed.
 6. **Graceful stop/restart:** First isolate the guest exposure path and independently verify it; only then stop network services or perform offline version migration. Keep baseline deny. Controller stop without verified isolation does not authorize removing the guard.
-7. **Crash / SIGKILL / failed start:** Do not auto-expose or reconfigure links to "recover". Existing timed grants can remain until kernel expiry (maximum 15 min): do not report instantaneous revocation from daemon death alone. Link-down retries stop when the daemon dies. A separate independent exposure gate or hardware intervention is needed to make stronger immediate-isolation claims.
-8. **Firewall reload / NetworkManager reconnect / USB NIC change:** Treat as a possible loss of authority. Do not rebuild a live table as a fallback. If a controlled isolated guest exposure gate cannot be confirmed OFF, classify safety **unconfirmed** and require physical operator intervention.
+7. **Crash / SIGKILL / failed start:** Do not auto-expose or reconfigure links to recover. Existing grants can remain until kernel expiry (maximum 15 min). A dedicated-appliance systemd failure/finalizer path may close the guest link, disable IPv4 forwarding and flush grants, but needs fault testing and independent readback. The helper is not an immediate-denial guarantee if systemd or the host also fails. Unrelated host forwarding must never be sacrificed implicitly.
+8. **Firewall reload / NetworkManager reconnect / USB NIC change:** Treat as a loss of authority. Do not rebuild a live table as fallback. The guard may be destroyed by a distro `flush ruleset` restart and no longer protects a renamed device when rules depend on `iifname`; report isolation unconfirmed and require operator intervention until a verified closed state is restored.
 9. **Rollback / uninstall:** First disconnect the guest externally; verify management route and kernel deny remain intact. Stop the adapter, revoke grants and isolate link; remove only version-matched Portcullis-managed artifacts while independently isolated. Unknown or foreign state blocks automatic removal; retain deny and emit explicit recovery instructions. Never modify a management connection as an "uninstall cleanup".
 
 Expected systemd dependency graph: a *preflight/guard-attestation* prerequisite precedes a controller readiness check, which precedes a separately gated guest exposure action; failures of any predecessor inhibit exposure. This is an ordering contract, **not** a claim that systemd alone provides early-boot physical isolation. Unit names, capabilities, sandboxing, `BindsTo`/`PartOf` policies and network management integration must be implemented and tested in a later PR, not inferred from this design.
@@ -88,7 +88,7 @@ Expected systemd dependency graph: a *preflight/guard-attestation* prerequisite 
 Report two independent axes:
 
 - **Enforcement:** `guard_attested`, `guard_invalid`, `guard_unknown`; include last successful readback time, schema, interface binding and bounded-grant snapshot.
-- **Exposure:** `physically_isolated_confirmed`, `admin_down_confirmed`, `isolation_unconfirmed`. Administrative DOWN is not equivalent to independently confirmed physical isolation. A successful past status is not permanent proof.
+- **Exposure:** `operator_reported_disconnected`, `admin_down_confirmed`, `isolation_unconfirmed`; an instrumented `physically_isolated_confirmed` is permitted **only when backed by an independent sensor or controllable external port gate**. An operator assertion is explicitly not machine attestation. Administrative DOWN may be an effective software barrier in a managed-dedicated NIC design, but another privileged owner can re-UP it.
 
 Any transition away from an attested guard refuses new grants. An operator interface must not display `safe`, `isolated` or `fail-closed` solely because degraded mode was entered. Preserve the explicit confirmed/unconfirmed distinction from [#9](https://github.com/thetechbenders/portcullis/issues/9); do not invent a sensor that can distinguish physical unplugged state without a trustworthy measurement source.
 
@@ -96,7 +96,7 @@ Recovery requires a local console or separately functioning management link, a d
 
 ## Test gates and evidence
 
-**Gate 0: Docs/design (this PR).** Security/design review agrees on interface identity, independent gate, management topology, state machine, owners and rollback. No package install or runtime mutation.
+**Gate 0: Docs/design (this PR).** Security/design review agrees on interface identity, exposure control, manager ownership, boot-time guard restoration, forwarding ownership, state machine and rollback. No package install or runtime mutation.
 
 **Gate 1: Disposable VM/namespace acceptance (future code PR).** The host adapter's state machine is tested without physical devices. Every denied probe needs a positive control showing packets would otherwise have reached the test destination; record guarded-direction drop counters and state readback. Fault matrix:
 
@@ -104,12 +104,12 @@ Recovery requires a local console or separately functioning management link, a d
 | --- | --- |
 | Guard missing, dormant, wrong hook, wrong interface, stale schema | No exposure; no authorization; explicit invalid state |
 | Boot services delayed, reordered or crashing before ready | No guest delivery; no permissive fallback; independent exposure remains OFF |
-| Controller SIGKILL/crash during bounded grant | Existing grant authority honestly reported until kernel expiry; do not falsely claim immediate stop without an independent gate |
-| nftables reload/removal, legacy rules/flowtable/tc/XDP drift | Refuse service/exposure; declare isolation unconfirmed if the independent gate cannot be verified |
+| Controller SIGKILL/crash during bounded grant | No claim of immediate stop unless an independently tested finalizer or gate has actually isolated traffic; kernel timeout remains the conservative bound |
+| nftables reload/removal, legacy rules/flowtable/tc/XDP drift | Refuse service/exposure and record isolation unconfirmed unless independent current isolation is verified |
 | NetworkManager reactivates a guest or uplink changes | Treat as exposure violation; prevent continuing grants; fail test if management is disturbed |
 | Interface disappears/re-enumerates, unexpected bridge/VLAN/upper | Refuse pinned identity; no opportunistic substitution |
 | IPv6 becomes enabled, route/VPN changes, protected-prefix collision | No IPv6 leak, no guest-to-management path, no alternate uplink |
-| Partial upgrade, rollback, stale table, power loss | Preserve independent isolation; offline migration only; no table-replacement authorization |
+| Partial upgrade, rollback, stale table, power loss | Preserve disconnected guest for pilot and tested early-boot denial for unattended model; offline migration only |
 | Explicit revoke, kernel expiry, long-lived TCP/UDP | Bidirectional loss of delivery with positive recovery controls, including existing flows |
 
 A CI status or in-namespace packet test is **not** a physical hardware safety certificate.
