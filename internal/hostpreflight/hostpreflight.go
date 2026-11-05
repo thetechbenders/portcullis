@@ -218,10 +218,14 @@ func Evaluate(s Snapshot, sel Selection) Report {
 	for _, nic := range s.Interfaces {
 		byName[nic.Name] = nic
 	}
-	for role, name := range map[string]string{"guest": sel.Guest, "uplink": sel.Uplink, "management": sel.Management} {
-		if name != "" {
-			if _, found := byName[name]; !found {
-				add("interface_missing", role+" interface "+name+" does not exist")
+	for _, candidate := range []struct{ role, name string }{
+		{"guest", sel.Guest},
+		{"uplink", sel.Uplink},
+		{"management", sel.Management},
+	} {
+		if candidate.name != "" {
+			if _, found := byName[candidate.name]; !found {
+				add("interface_missing", candidate.role+" interface "+candidate.name+" does not exist")
 			}
 		}
 	}
