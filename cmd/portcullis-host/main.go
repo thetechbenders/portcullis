@@ -56,7 +56,7 @@ func run(args []string, out io.Writer, diag io.Writer, collect func() hostprefli
 		}
 		if err := encoder.Encode(snapshot); err != nil {
 			fmt.Fprintln(diag, "cannot encode inventory:", err)
-			return 1
+			return 3
 		}
 		if len(snapshot.InventoryError) != 0 {
 			return 1
@@ -65,17 +65,11 @@ func run(args []string, out io.Writer, diag io.Writer, collect func() hostprefli
 	}
 	report := hostpreflight.Evaluate(snapshot, sel)
 	if !*private {
-		report.Selection.PinnedGuestMAC = ""
-		report.Selection.PinnedGuestSysfs = ""
-		report.Selection.PinnedUplinkMAC = ""
-		report.Selection.PinnedUplinkSysfs = ""
-		report.Selection.PinnedManagementMAC = ""
-		report.Selection.PinnedManagementSysfs = ""
-		report.BootID = ""
+		report = hostpreflight.RedactReport(report)
 	}
 	if err := encoder.Encode(report); err != nil {
 		fmt.Fprintln(diag, "cannot encode assessment:", err)
-		return 1
+		return 3
 	}
 	if len(report.Hazards) != 0 {
 		return 1
