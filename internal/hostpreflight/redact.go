@@ -1,5 +1,21 @@
 package hostpreflight
 
+import (
+ "crypto/sha256"
+ "fmt"
+ "regexp"
+)
+
+var macInterfaceName = regexp.MustCompile(`(?i)^enx[0-9a-f]{12})
+
+func redactInterfaceName(name string) string {
+ if macInterfaceName.MatchString(name) {
+  sum := sha256.Sum256([]byte(name))
+  return fmt.Sprintf("enx-redacted-%x", sum[:4])
+ }
+ return name
+}
+
 // RedactSnapshot produces a copy for sharing. The unredacted observation is
 // always used for evaluation, so redaction cannot cause missing hazards.
 func RedactSnapshot(s Snapshot) Snapshot {
@@ -7,6 +23,9 @@ func RedactSnapshot(s Snapshot) Snapshot {
 	s.BootID = ""
 	s.Interfaces = append([]Interface(nil), s.Interfaces...)
 	for i := range s.Interfaces {
+		s.Interfaces[i].Name = redactInterfaceName(s.Interfaces[i].Name)
+		s.Interfaces[i].Master = redactInterfaceName(s.Interfaces[i].Master)
+		for j := range s.Interfaces[i].Uppers { s.Interfaces[i].Uppers[j] = redactInterfaceName(s.Interfaces[i].Uppers[j]) }
 		s.Interfaces[i].MAC = ""
 		s.Interfaces[i].SysfsPath = ""
 		s.Interfaces[i].Addresses = nil
@@ -14,10 +33,12 @@ func RedactSnapshot(s Snapshot) Snapshot {
 	s.Routes = append([]Route(nil), s.Routes...)
 	for i := range s.Routes {
 		s.Routes[i].Destination = ""
+		s.Routes[i].Interface = redactInterfaceName(s.Routes[i].Interface)
 	}
 	s.DefaultRoutes = append([]Route(nil), s.DefaultRoutes...)
 	for i := range s.DefaultRoutes {
 		s.DefaultRoutes[i].Destination = ""
+		s.DefaultRoutes[i].Interface = redactInterfaceName(s.DefaultRoutes[i].Interface)
 	}
 	return s
 }
