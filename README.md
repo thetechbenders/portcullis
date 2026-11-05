@@ -1,6 +1,8 @@
 # Portcullis
 
-Self-hosted, open-source Linux captive-portal gateway project. **Not a deployable guest gateway.**
+Self-hosted, open-source Linux captive-portal gateway project. **Current main is a merged, disposable network-namespace demonstration, not a deployable guest gateway.**
+
+**Roadmap:** [docs/ROADMAP.md](docs/ROADMAP.md) is the proposed staged plan for Formnext acceptance, physical host deployment, trusted AP attachment, internet routing, session policy and operations. Its milestones must not be read as deployment authorization.
 
 ## Status
 
@@ -12,11 +14,11 @@ The lab checks IPv4/IPv6 guest INPUT and bidirectional FORWARD filtering, per-ru
 
 **Warning:** full-table bootstrap/replacement can leak packets across base-chain hook generation changes, even though its resulting state and rollback semantics are atomic. **Never apply the bootstrap to an active guest interface or use it for live reconciliation.** The in-place reconciler maintains existing base-chain hooks, but lab stress results do not prove gap freedom for every kernel, topology, or hardware offload path.
 
-**Production gaps:** boot/reload ownership, access-layer station binding, tc/payload-rewriting attestation, HTTPS, payment and physical network acceptance. The Formnext draft below implements a disposable demonstration; it is not approved for deployment.
+**Deployment gaps:** boot/reload and physical interface ownership, access-layer station binding, versioned guard migrations, post-grant internet DNS/NAT, and real-hardware acceptance. Additional privileged tc/XDP and physical-path risks remain outside the demo's attestation boundary. Payment and account systems are **not** current product requirements. The Formnext demonstration is not approved for real-network deployment.
 
-## Formnext vertical slice (integrated draft)
+## Formnext vertical slice (merged demo)
 
-A disposable-namespace demonstration of the whole guest journey is integrated on top of the Phase 3 attestor. [Integration evidence and review limits](docs/formnext-integration.md) track the original handoff, security corrections and exact-head CI. [PR #8](https://github.com/thetechbenders/portcullis/pull/8) remains draft and unmerged pending review. See [docs/formnext-design.md](docs/formnext-design.md) for the contract and trust boundaries, and [docs/formnext-demo.md](docs/formnext-demo.md) for the booth runbook.
+The disposable-namespace guest journey is integrated on top of the Phase 3 attestor. [PR #8](https://github.com/thetechbenders/portcullis/pull/8) merged into `main` on November 5, 2026, via merge commit [`ebe1aa5`](https://github.com/thetechbenders/portcullis/commit/ebe1aa5ddb75c778b445b9bfd44384d2f0576b10). The final pre-merge [CI run](https://github.com/thetechbenders/portcullis/actions/runs/42021197054) passed Go, real-kernel namespace and Formnext E2E tests; **human-operated disposable-VM rehearsal has not been verified**. See [integration evidence and review limits](docs/formnext-integration.md), the [design contract](docs/formnext-design.md), the [booth runbook](docs/formnext-demo.md), and the [roadmap](docs/ROADMAP.md).
 
 - `portcullisd` (privileged): installs the persistent guard only while the guest link is down; attests it, bypass paths and topology before serving; built-in DHCPv4 server as the identity source; timed kernel grant elements; revoke-all on start; degraded mode with **mandatory guest-link isolation** before grant cleanup.
 - `portcullis-portal` (unprivileged): guest HTTP portal and static non-recursive DNS on the gateway guest address only. It passes each guest TCP socket to the controller, which derives identity from the kernel, never from the browser.
