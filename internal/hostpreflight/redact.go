@@ -42,3 +42,20 @@ func RedactSnapshot(s Snapshot) Snapshot {
 	}
 	return s
 }
+
+func RedactReport(r Report) Report {
+ r.BootID = ""
+ r.Selection.Guest = redactInterfaceName(r.Selection.Guest)
+ r.Selection.Uplink = redactInterfaceName(r.Selection.Uplink)
+ r.Selection.Management = redactInterfaceName(r.Selection.Management)
+ r.Selection.PinnedGuestMAC, r.Selection.PinnedGuestSysfs = "", ""
+ r.Selection.PinnedUplinkMAC, r.Selection.PinnedUplinkSysfs = "", ""
+ r.Selection.PinnedManagementMAC, r.Selection.PinnedManagementSysfs = "", ""
+ r.Hazards = append([]Finding(nil), r.Hazards...)
+ // Avoid copying sensitive paths, IPs or hardware-encoded interface names
+ // from diagnostic strings into a report intended for sharing.
+ for i := range r.Hazards {
+  r.Hazards[i].Detail = "Observed condition requires private local inspection; see finding code"
+ }
+ return r
+}
