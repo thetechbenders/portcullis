@@ -1,6 +1,6 @@
 # Pi 5 passive host inventory and topology check (experimental)
 
-**Status:** Unmerged code in [PR #19](https://github.com/thetechbenders/portcullis/pull/19) for [issue #10](https://github.com/thetechbenders/portcullis/issues/10). **Neither command authorizes activating a guest interface.** See proposed [ownership ADR PR #18](https://github.com/thetechbenders/portcullis/pull/18).
+**Status:** Read-only host preflight merged via [PR #19](https://github.com/thetechbenders/portcullis/pull/19) for [issue #10](https://github.com/thetechbenders/portcullis/issues/10). **Neither command authorizes activating a guest interface.** See proposed [ownership ADR PR #18](https://github.com/thetechbenders/portcullis/pull/18).
 
 ## Design: two non-mutating stages
 
@@ -9,7 +9,7 @@ The standard-library-only `portcullis-host` binary performs no sudo, subprocesse
 1. **`inventory`** reads Linux kernel-facing evidence. It emits a timestamped observation, not a safety verdict. Zero exit means the visible inventory was collected without a reported read error. It does **not** mean networking is safe to expose.
 2. **`check -plan FILE`** compares that observation with an explicitly pinned, versioned operator plan. It emits `hazards[]`, `not_assessed[]`, a pseudonymous boot identifier (raw ID only in private mode), `observed_at` and a SHA-256 digest of the normalized plan. Exit **0** means no *observed* hazards; exit **1** means at least one was observed; exit **2** means invalid arguments or plan; exit **3** means the JSON output could not be written. None of these codes authorizes guest exposure. An independent privileged attestation and a separately reviewed activation design remain necessary.
 
-By default, both commands **redact sensitive observations**. `-private` includes actual hostname, MACs, addresses, device paths, and the boot ID. MAC-derived `enx...`, `wlx...`, and `wwx...` interface names are replaced with report-local counters in redacted output; diagnostic details are suppressed in redacted inventory and checks. These replacements are not durable identifiers across reports. Even a shared redacted inventory can expose other interface names, topology and kernel version, so inspect it before sharing. The assessment never includes raw packet contents, tokens, Wi-Fi passwords or SSH material. Keep unredacted reports out of Git history.
+By default, both commands **redact sensitive observations**. `-private` includes actual hostname, MACs, addresses, device paths, and the boot ID. MAC-derived `enx...`, `wlx...`, and `wwx...` interface names are replaced with report-local counters in redacted output; diagnostic details are suppressed in redacted inventory and checks. These replacements are not durable identifiers across reports. **Redaction is not unlinkability:** `plan_sha256` remains stable for the same normalized operator plan across reports and boots; it can correlate shared reports and may allow guesses about a predictable plan. The pseudonymous boot ID is a deterministic digest of the locally readable kernel boot ID, so anyone with access to that boot ID can reproduce the pseudonym and link reports from the same boot. Neither is a secret or an anonymity guarantee. Even a shared redacted inventory can expose other interface names, topology and kernel version, so inspect it before sharing. The assessment never includes raw packet contents, tokens, Wi-Fi passwords or SSH material. Keep unredacted reports out of Git history.
 
 ## Safe usage
 
@@ -64,7 +64,7 @@ The tool pins the current MAC and sysfs parent path for all three roles, but **d
 
 - Hostname, boot ID, UTC collection time, kernel release, OS and CPU architecture.
 - Interfaces, ifindex, current MAC, canonical parent sysfs path, available driver, UP/operstate, master/upper devices, address assignments, MAC assignment type and IPv6 disable/accept-RA sysctls.
-- Global and per-interface IPv4/IPv6 forwarding sysctls, including available IPv6 `force_forwarding` controls.
+- Global, default-for-new-interface (`conf/default/forwarding`) and per-interface IPv4/IPv6 forwarding sysctls, including available IPv6 `force_forwarding` controls. Enabled inherited defaults are flagged even if all current interfaces are safe, because a newly attached interface may inherit forwarding.
 - Kernel procfs visible IPv4/IPv6 routes, with parsing of flags and IPv6 reject/null routes. **IPv4 procfs shows only the main routing table; it is not a complete policy route/rule inventory.** The output explicitly lists these unassessed paths. Route observations are point-in-time, not an atomic kernel snapshot.
 - Read/parse errors are explicit findings; missing data is not interpreted as proof of isolation. If the kernel exposes no IPv6 sysctl tree, IPv6 is treated as unavailable rather than generating per-interface IPv6 hazards. In that case only, a missing `/proc/net/ipv6_route` is expected and not an inventory error; permission errors or missing IPv6 routes when IPv6 is available remain errors. The inventory compares interface enumeration before and after route collection, but a rapid rename-and-revert remains unassessed.
 
