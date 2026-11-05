@@ -20,17 +20,17 @@ import (
 const SchemaVersion = 1
 
 type Interface struct {
-	Name       string   `json:"name"`
-	Index      int      `json:"index"`
-	MAC        string   `json:"mac,omitempty"`
-	SysfsPath  string   `json:"sysfs_path,omitempty"`
-	Driver     string   `json:"driver,omitempty"`
-	Master     string   `json:"master,omitempty"`
-	Uppers     []string `json:"uppers"`
-	Addresses  []string `json:"addresses"`
-	Up         bool     `json:"up"`
-	Loopback   bool     `json:"loopback"`
-	OperState  string   `json:"oper_state,omitempty"`
+	Name      string   `json:"name"`
+	Index     int      `json:"index"`
+	MAC       string   `json:"mac,omitempty"`
+	SysfsPath string   `json:"sysfs_path,omitempty"`
+	Driver    string   `json:"driver,omitempty"`
+	Master    string   `json:"master,omitempty"`
+	Uppers    []string `json:"uppers"`
+	Addresses []string `json:"addresses"`
+	Up        bool     `json:"up"`
+	Loopback  bool     `json:"loopback"`
+	OperState string   `json:"oper_state,omitempty"`
 }
 
 type Route struct {
@@ -51,11 +51,11 @@ type Snapshot struct {
 // Selection is an *expected* topology supplied by an operator. No device is
 // automatically selected from a default route or interface enumeration.
 type Selection struct {
-	Guest              string `json:"guest,omitempty"`
-	Uplink             string `json:"uplink,omitempty"`
-	Management         string `json:"management,omitempty"`
-	PinnedGuestMAC     string `json:"pinned_guest_mac,omitempty"`
-	PinnedGuestSysfs   string `json:"pinned_guest_sysfs,omitempty"`
+	Guest            string `json:"guest,omitempty"`
+	Uplink           string `json:"uplink,omitempty"`
+	Management       string `json:"management,omitempty"`
+	PinnedGuestMAC   string `json:"pinned_guest_mac,omitempty"`
+	PinnedGuestSysfs string `json:"pinned_guest_sysfs,omitempty"`
 }
 
 type Finding struct {
@@ -65,13 +65,13 @@ type Finding struct {
 }
 
 type Report struct {
-	SchemaVersion       int       `json:"schema_version"`
-	ReadOnly            bool      `json:"read_only"`
-	DeploymentAuthorized bool     `json:"deployment_authorized"`
-	Status              string    `json:"status"`
-	Selection           Selection `json:"selection"`
-	Snapshot            Snapshot  `json:"snapshot"`
-	Findings            []Finding `json:"findings"`
+	SchemaVersion        int       `json:"schema_version"`
+	ReadOnly             bool      `json:"read_only"`
+	DeploymentAuthorized bool      `json:"deployment_authorized"`
+	Status               string    `json:"status"`
+	Selection            Selection `json:"selection"`
+	Snapshot             Snapshot  `json:"snapshot"`
+	Findings             []Finding `json:"findings"`
 }
 
 // Collect inspects only kernel-exposed files and the standard library's
@@ -157,7 +157,9 @@ func Collect() Snapshot {
 	}
 	sort.Slice(s.DefaultRoutes, func(i, j int) bool {
 		a, b := s.DefaultRoutes[i], s.DefaultRoutes[j]
-		if a.Family == b.Family { return a.Interface < b.Interface }
+		if a.Family == b.Family {
+			return a.Interface < b.Interface
+		}
 		return a.Family < b.Family
 	})
 	return s
@@ -165,14 +167,22 @@ func Collect() Snapshot {
 
 func readBoundedLines(path string, limit int64) ([]string, error) {
 	f, err := os.Open(path)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer f.Close()
 	b, err := io.ReadAll(io.LimitReader(f, limit+1))
-	if err != nil { return nil, err }
-	if int64(len(b)) > limit { return nil, fmt.Errorf("file exceeds %d-byte read limit", limit) }
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(b)) > limit {
+		return nil, fmt.Errorf("file exceeds %d-byte read limit", limit)
+	}
 	out := []string{}
 	sc := bufio.NewScanner(strings.NewReader(string(b)))
-	for sc.Scan() { out = append(out, sc.Text()) }
+	for sc.Scan() {
+		out = append(out, sc.Text())
+	}
 	return out, sc.Err()
 }
 
@@ -188,9 +198,15 @@ func Evaluate(s Snapshot, sel Selection) Report {
 	add := func(code, detail string) {
 		r.Findings = append(r.Findings, Finding{Code: code, Severity: "blocker", Detail: detail})
 	}
-	for _, err := range s.InventoryError { add("inventory_incomplete", err) }
-	if s.OS != "linux" { add("unsupported_os", "Linux host evidence is required") }
-	if s.Arch != "arm64" { add("unverified_target_arch", "target Pi profile expects arm64") }
+	for _, err := range s.InventoryError {
+		add("inventory_incomplete", err)
+	}
+	if s.OS != "linux" {
+		add("unsupported_os", "Linux host evidence is required")
+	}
+	if s.Arch != "arm64" {
+		add("unverified_target_arch", "target Pi profile expects arm64")
+	}
 	if sel.Guest == "" || sel.Uplink == "" || sel.Management == "" {
 		add("interfaces_not_selected", "guest, uplink and management must all be explicitly selected")
 	}
@@ -199,16 +215,24 @@ func Evaluate(s Snapshot, sel Selection) Report {
 		add("overlapping_roles", "guest, uplink and management interfaces must be distinct")
 	}
 	byName := map[string]Interface{}
-	for _, nic := range s.Interfaces { byName[nic.Name] = nic }
+	for _, nic := range s.Interfaces {
+		byName[nic.Name] = nic
+	}
 	for role, name := range map[string]string{"guest": sel.Guest, "uplink": sel.Uplink, "management": sel.Management} {
 		if name != "" {
-			if _, found := byName[name]; !found { add("interface_missing", role+" interface "+name+" does not exist") }
+			if _, found := byName[name]; !found {
+				add("interface_missing", role+" interface "+name+" does not exist")
+			}
 		}
 	}
 	if sel.Guest != "" {
 		if guest, ok := byName[sel.Guest]; ok {
-			if guest.Loopback || guest.Up { add("guest_exposed", "guest interface must not be loopback or administratively UP during initial preflight") }
-			if len(guest.Addresses) > 0 { add("guest_has_addresses", "guest interface already has an IP address; do not adopt it") }
+			if guest.Loopback || guest.Up {
+				add("guest_exposed", "guest interface must not be loopback or administratively UP during initial preflight")
+			}
+			if len(guest.Addresses) > 0 {
+				add("guest_has_addresses", "guest interface already has an IP address; do not adopt it")
+			}
 			if guest.Master != "" || len(guest.Uppers) > 0 {
 				add("guest_topology_conflict", "guest has a master or upper device; a bypass may exist")
 			}
