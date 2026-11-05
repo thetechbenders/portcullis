@@ -13,6 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"time"
+	"net/netip"
 	"sort"
 	"strings"
 )
@@ -31,14 +34,24 @@ type Interface struct {
 	Up        bool     `json:"up"`
 	Loopback  bool     `json:"loopback"`
 	OperState string   `json:"oper_state,omitempty"`
+	IPv6Disabled *bool `json:"ipv6_disabled,omitempty"`
+	AcceptRA *int `json:"accept_ra,omitempty"`
+	MACAssignType *int `json:"mac_assign_type,omitempty"`
 }
 
 type Route struct {
 	Family    string `json:"family"`
 	Interface string `json:"interface"`
+	Destination string `json:"destination"`
+	Default bool `json:"default"`
 }
 
 type Snapshot struct {
+	BootID string `json:"boot_id,omitempty"`
+	ObservedAt string `json:"observed_at"`
+	IPv4Forwarding *bool `json:"ipv4_forwarding,omitempty"`
+	IPv6Forwarding *bool `json:"ipv6_forwarding,omitempty"`
+	Routes []Route `json:"routes"`
 	Hostname       string      `json:"hostname,omitempty"`
 	OS             string      `json:"os"`
 	Arch           string      `json:"arch"`
@@ -79,9 +92,17 @@ type Report struct {
 func Collect() Snapshot {
 	s := Snapshot{
 		OS: runtime.GOOS, Arch: runtime.GOARCH,
-		Interfaces: []Interface{}, DefaultRoutes: []Route{},
+		Interfaces: []Interface{}, DefaultRoutes: []Route{}, Routes: []Route{},
+		ObservedAt: time.Now().UTC().Format(time.RFC3339Nano),
 		InventoryError: []string{},
 	}
+	if b, err := os.ReadFile("/proc/sys/kernel/random/boot_id"); err == nil {
+		s.BootID = strings.TrimSpace(string(b))
+	} else {
+		s.InventoryError = append(s.InventoryError, "boot id: "+err.Error())
+	}
+	s.IPv4Forwarding = readBoolSysctl("/proc/sys/net/ipv4/ip_forward", &s.InventoryError)
+	s.IPv6Forwarding = readBoolSysctl("/proc/sys/net/ipv6/conf/all/forwarding", &s.InventoryError)
 	if name, err := os.Hostname(); err == nil {
 		s.Hostname = name
 	} else {
@@ -103,9 +124,14 @@ func Collect() Snapshot {
 				Uppers: []string{}, Addresses: []string{},
 			}
 			base := filepath.Join("/sys/class/net", ni.Name)
-			if path, err := filepath.EvalSymlinks(base); err == nil {
+			if path, err := filepath.EvalSymlinks(filepath.Join(base, "device")); err == nil {
+				item.SysfsPath = path
+			} else if path, err := filepath.EvalSymlinks(base); err == nil {
 				item.SysfsPath = path
 			}
+			item.IPv6Disabled = readBoolSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "disable_ipv6"), &s.InventoryError)
+			item.AcceptRA = readIntSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "accept_ra"), &s.InventoryError)
+			item.MACAssignType = readIntSysctl(filepath.Join(base, "addr_assign_type"), &s.InventoryError)
 			if path, err := filepath.EvalSymlinks(filepath.Join(base, "device/driver")); err == nil {
 				item.Driver = filepath.Base(path)
 			}
@@ -144,17 +170,24 @@ func Collect() Snapshot {
 			s.InventoryError = append(s.InventoryError, "routes "+file.family+": "+err.Error())
 			continue
 		}
-		for _, line := range lines {
-			fields := strings.Fields(line)
-			if file.family == "ipv4" {
-				if len(fields) >= 8 && fields[1] == "00000000" && fields[7] == "00000000" {
-					s.DefaultRoutes = append(s.DefaultRoutes, Route{Family: file.family, Interface: fields[0]})
-				}
-			} else if len(fields) >= 10 && fields[0] == strings.Repeat("0", 32) && fields[1] == "00" {
-				s.DefaultRoutes = append(s.DefaultRoutes, Route{Family: file.family, Interface: fields[len(fields)-1]})
-			}
+		routes, err := ParseProcRoutes(file.family, lines)
+		if err != nil {
+			s.InventoryError = append(s.InventoryError, "routes "+file.family+": "+err.Error())
+			continue
+		}
+		s.Routes = append(s.Routes, routes...)
+		for _, route := range routes {
+			if route.Default { s.DefaultRoutes = append(s.DefaultRoutes, route) }
 		}
 	}
+	sort.Slice(s.Routes, func(i, j int) bool {
+		a, b := s.Routes[i], s.Routes[j]
+		if a.Family == b.Family {
+			if a.Interface == b.Interface { return a.Destination < b.Destination }
+			return a.Interface < b.Interface
+		}
+		return a.Family < b.Family
+	})
 	sort.Slice(s.DefaultRoutes, func(i, j int) bool {
 		a, b := s.DefaultRoutes[i], s.DefaultRoutes[j]
 		if a.Family == b.Family {
@@ -272,4 +305,30 @@ func Evaluate(s Snapshot, sel Selection) Report {
 	add("recovery_unverified", "management reachability and physical recovery are not proven by an interface being UP")
 	add("physical_acceptance_outstanding", "no supervised packet, reboot, crash or power-loss acceptance has run on this topology")
 	return r
+}
+
+// Sysctl reads are passive; unavailable kernel state remains unknown.
+func readIntSysctl(path string, problems *[]string) *int {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		*problems = append(*problems, "cannot read "+path+": "+err.Error())
+		return nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		*problems = append(*problems, "invalid sysctl "+path)
+		return nil
+	}
+	return &n
+}
+
+func readBoolSysctl(path string, problems *[]string) *bool {
+	n := readIntSysctl(path, problems)
+	if n == nil { return nil }
+	if *n != 0 && *n != 1 {
+		*problems = append(*problems, "unexpected boolean sysctl "+path)
+		return nil
+	}
+	v := *n == 1
+	return &v
 }
