@@ -117,14 +117,14 @@ func TestDenyAttestationRejectsAmbiguousAndMalformedFields(t *testing.T) {
 		"duplicate object kind":  replace(`"table":{`, `"table":{},"table":{`),
 		"duplicate rule comment": replace(`"comment":"guest-egress"`, `"comment":"bogus","comment":"guest-egress"`),
 		"duplicate nested match": replace(`"op":"=="`, `"op":"!=","op":"=="`),
-		"top-level extra":      strings.TrimSuffix(string(good), "}") + `,"other":42}`,
-		"empty metainfo":       replace(`"metainfo":{"version":"1.0.9"}`, `"metainfo":null`),
-		"null table flags":     replace(`"name":"portcullis_guard"}`, `"name":"portcullis_guard","flags":null}`),
-		"unknown table field":  replace(`"name":"portcullis_guard"}`, `"name":"portcullis_guard","flags_extra":["dormant"]}`),
-		"missing chain family": replace(`"chain":{"family":"inet",`, `"chain":{`),
-		"counter fractional":   replace(`"packets":0`, `"packets":0.5`),
-		"counter negative":     replace(`"bytes":0`, `"bytes":-1`),
-		"verdict payload":      replace(`"drop":null`, `"drop":{"unexpected":true}`),
+		"top-level extra":        strings.TrimSuffix(string(good), "}") + `,"other":42}`,
+		"empty metainfo":         replace(`"metainfo":{"version":"1.0.9"}`, `"metainfo":null`),
+		"null table flags":       replace(`"name":"portcullis_guard"}`, `"name":"portcullis_guard","flags":null}`),
+		"unknown table field":    replace(`"name":"portcullis_guard"}`, `"name":"portcullis_guard","flags_extra":["dormant"]}`),
+		"missing chain family":   replace(`"chain":{"family":"inet",`, `"chain":{`),
+		"counter fractional":     replace(`"packets":0`, `"packets":0.5`),
+		"counter negative":       replace(`"bytes":0`, `"bytes":-1`),
+		"verdict payload":        replace(`"drop":null`, `"drop":{"unexpected":true}`),
 	}
 	for name, input := range cases {
 		t.Run(name, func(t *testing.T) {
