@@ -26,7 +26,7 @@ func fixture() (Snapshot, Selection) {
 		Routes:         []Route{{Family: "ipv4", Interface: "eth0", Destination: "0.0.0.0/0", Default: true}},
 		InventoryError: []string{},
 	}
-	sel := Selection{Guest: "usb0", Uplink: "eth0", Management: "wlan0", PinnedGuestMAC: "02:22:33:44:55:66", PinnedGuestSysfs: "/sys/devices/pci0000/usb0", PinnedUplinkMAC:"dc:a6:32:aa:bb:cc", PinnedUplinkSysfs:"/sys/devices/platform/soc/eth0", PinnedManagementMAC:"dc:a6:32:bb:cc:dd", PinnedManagementSysfs:"/sys/devices/platform/soc/wlan0"}
+	sel := Selection{Guest: "usb0", Uplink: "eth0", Management: "wlan0", PinnedGuestMAC: "02:22:33:44:55:66", PinnedGuestSysfs: "/sys/devices/pci0000/usb0", PinnedUplinkMAC: "dc:a6:32:aa:bb:cc", PinnedUplinkSysfs: "/sys/devices/platform/soc/eth0", PinnedManagementMAC: "dc:a6:32:bb:cc:dd", PinnedManagementSysfs: "/sys/devices/platform/soc/wlan0"}
 	return s, sel
 }
 
