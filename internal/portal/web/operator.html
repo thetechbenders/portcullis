@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<title>Operator console · Portcullis</title>
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/operator.css">
+<script src="/assets/operator.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 48 48" width="40" height="40" aria-hidden="true" focusable="false">
+      <path class="mark-arch" d="M7 45V20a17 17 0 0 1 34 0v25"/>
+      <path class="mark-bars" d="M16 9v29M24 6.5V38M32 9v29M11 18.5h26M11 28.5h26"/>
+      <path class="mark-spikes" d="M14 37.5h4L16 43zM22 37.5h4L24 43zM30 37.5h4L32 43z"/>
+    </svg>
+    <div><p class="wordmark">Portcullis</p><p class="sub">Operator console</p></div>
+  </div>
+  <div class="top-right">
+    <p class="conn" id="conn" role="status" aria-live="polite">Locked</p>
+    <button type="button" class="btn btn-ghost" id="lock" hidden>Lock</button>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="card login" id="login" aria-labelledby="login-title">
+    <h1 id="login-title">Unlock the operator console</h1>
+    <p class="muted">Paste the dashboard token from the token file. It is kept only in this browser tab.</p>
+    <form id="unlock" novalidate>
+      <label for="token">Dashboard token</label>
+      <input id="token" name="token" type="password" autocomplete="off" spellcheck="false" required>
+      <p class="error" id="login-error" role="alert" hidden></p>
+      <button type="submit" class="btn btn-primary">Unlock</button>
+    </form>
+  </section>
+
+  <div class="grid" id="dash" hidden>
+    <section class="card enforcement" id="enforcement" data-tone="neutral" aria-labelledby="enf-title">
+      <h2 id="enf-title">Enforcement</h2>
+      <p class="enf-state" id="enf-state">Waiting for snapshot…</p>
+      <p class="muted" id="enf-reason"></p>
+      <dl class="facts">
+        <div><dt>Last attestation</dt><dd id="att-age">—</dd></div>
+        <div><dt>Snapshot</dt><dd id="snap-time">—</dd></div>
+        <div><dt>Bound devices</dt><dd id="count-bindings">—</dd></div>
+        <div><dt>Active grants</dt><dd id="count-grants">—</dd></div>
+      </dl>
+    </section>
+
+    <section class="card wide" aria-labelledby="counters-title">
+      <h2 id="counters-title">Live firewall evidence</h2>
+      <p class="muted">Packet counters read from the kernel guard rules at the last attestation.</p>
+      <div class="scroll"><table>
+        <thead><tr><th scope="col">Rule</th><th scope="col">Verdict</th><th scope="col" class="num">Packets</th><th scope="col" class="num">Change</th><th scope="col" class="num">Bytes</th></tr></thead>
+        <tbody id="counters"></tbody>
+      </table></div>
+    </section>
+
+    <section class="card wide" aria-labelledby="grants-title">
+      <h2 id="grants-title">Grants: controller vs kernel</h2>
+      <div class="scroll"><table>
+        <thead><tr><th scope="col">Address</th><th scope="col">MAC</th><th scope="col" class="num">Length</th><th scope="col" class="num">Controller left</th><th scope="col" class="num">Kernel left</th><th scope="col">Kernel element</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead>
+        <tbody id="grants"></tbody>
+      </table></div>
+    </section>
+
+    <section class="card wide" aria-labelledby="bindings-title">
+      <h2 id="bindings-title">DHCP bindings</h2>
+      <div class="scroll"><table>
+        <thead><tr><th scope="col">Address</th><th scope="col">MAC</th><th scope="col" class="num">Lease left</th><th scope="col">State</th><th scope="col"><span class="sr-only">Action</span></th></tr></thead>
+        <tbody id="bindings"></tbody>
+      </table></div>
+    </section>
+
+    <section class="card wide" aria-labelledby="events-title">
+      <h2 id="events-title">Recent events</h2>
+      <ol class="events" id="events"></ol>
+    </section>
+
+    <section class="card wide danger" aria-labelledby="reset-title">
+      <h2 id="reset-title">Reset</h2>
+      <p class="muted">Revoke every grant and clear all cooldowns. DHCP bindings are kept.</p>
+      <button type="button" class="btn btn-danger" id="reset">Reset all grants</button>
+    </section>
+  </div>
+  <p class="toast" id="toast" role="status" aria-live="polite" hidden></p>
+</main>
+</body>
+</html>

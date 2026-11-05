@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+<title>Guest access · Portcullis</title>
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/assets/guest.css">
+<script src="/assets/guest.js" defer></script>
+</head>
+<body>
+<div class="page">
+  <header class="brand">
+    <svg class="mark" viewBox="0 0 48 48" width="48" height="48" aria-hidden="true" focusable="false">
+      <path class="mark-arch" d="M7 45V20a17 17 0 0 1 34 0v25"/>
+      <path class="mark-bars" d="M16 9v29M24 6.5V38M32 9v29M11 18.5h26M11 28.5h26"/>
+      <path class="mark-spikes" d="M14 37.5h4L16 43zM22 37.5h4L24 43zM30 37.5h4L32 43z"/>
+    </svg>
+    <div>
+      <p class="wordmark">Portcullis</p>
+      <p class="tagline">Guest access, enforced at the gateway</p>
+    </div>
+  </header>
+
+  <main class="card" id="card" data-tone="busy" aria-busy="true">
+    <div class="status" role="status" aria-live="polite" aria-atomic="true">
+      <p class="pill"><span class="pill-dot" aria-hidden="true"></span><span id="pill">Checking</span></p>
+      <h1 id="title" tabindex="-1">Checking your connection…</h1>
+      <p class="detail" id="detail">Asking the gateway to identify this device.</p>
+    </div>
+
+    <div class="banner" id="banner" role="alert" hidden><p id="banner-text"></p></div>
+
+    <section class="panel" id="panel-request" aria-label="Request access" hidden>
+      <fieldset class="choices" id="choices">
+        <legend>How long do you need?</legend>
+        <div class="choice-grid" id="choice-grid"></div>
+      </fieldset>
+      <p class="wait" id="request-wait" hidden></p>
+      <button type="button" class="btn btn-primary" id="request">
+        <span class="spinner" aria-hidden="true"></span><span id="request-label">Request access</span>
+      </button>
+      <p class="fine">Only this device is let through, and only for the time you choose.</p>
+    </section>
+
+    <section class="panel" id="panel-granted" aria-label="Active access" hidden>
+      <p class="time" id="time" role="timer">0:00</p>
+      <p class="time-caption" id="time-caption">remaining</p>
+      <div class="meter" id="meter" role="progressbar" aria-label="Time remaining" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <span class="meter-fill" id="meter-fill"></span>
+      </div>
+      <p class="verified">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M4 12.5l5 5L20 6.5"/></svg>
+        <span>Access verified by the gateway firewall</span>
+      </p>
+      <p class="synced" id="synced">Confirmed by the gateway just now</p>
+      <button type="button" class="btn btn-secondary" id="release">End access now</button>
+    </section>
+
+    <section class="panel" id="panel-cooldown" aria-label="Cooldown" hidden>
+      <p class="time time-small" id="cooldown" role="timer">0:00</p>
+      <p class="time-caption">until you can request access again</p>
+    </section>
+
+    <details class="details">
+      <summary>Network details</summary>
+      <dl>
+        <div><dt>Address</dt><dd id="net-address">—</dd></div>
+        <div><dt>Device</dt><dd id="net-device">—</dd></div>
+        <div><dt>Identified by</dt><dd>The gateway's own DHCP record, checked against this page's live connection</dd></div>
+        <div><dt>Enforced by</dt><dd>The Linux kernel firewall on the gateway (nftables)</dd></div>
+      </dl>
+    </details>
+  </main>
+
+  <noscript>
+    <div class="card">
+      <h1>JavaScript is needed to request access</h1>
+      <p class="detail">This page uses a small script to ask the gateway for access. Without it nothing is granted, and internet access stays blocked.</p>
+    </div>
+  </noscript>
+
+  <footer class="footer">
+    <ul>
+      <li>No account and no cookies: the gateway recognizes this device from its network connection.</li>
+      <li>The firewall opens for this device only.</li>
+      <li>Access closes by itself when the timer ends, even if you close this page.</li>
+    </ul>
+  </footer>
+</div>
+</body>
+</html>

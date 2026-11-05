@@ -27,8 +27,13 @@ jobs:
         run: |
           gofmt -d .
           test -z "$(gofmt -l .)"
+      - name: Python relay unit tests
+        run: python3 -m unittest discover -s demo -p 'test_*.py' -v
       - name: Script syntax
-        run: bash -n tests/netns/run.sh && python3 -m py_compile tests/netns/tcp_fixture.py tests/netns/udp_probe.py tests/netns/udp_session.py tests/netns/udp_flood.py
+        run: |
+          for f in tests/netns/run.sh tests/netns/e2e.sh demo/portcullis-lab.sh; do bash -n "$f"; done
+          sh -n tests/netns/udhcpc.script
+          python3 -m py_compile tests/netns/*.py demo/nsproxy.py
   netns:
     timeout-minutes: 10
     runs-on: ubuntu-24.04
@@ -49,3 +54,70 @@ jobs:
           go test -tags netnslab ./internal/enforce
       - name: Namespace packet integration tests
         run: sudo bash tests/netns/run.sh "${{ runner.temp }}/portcullis-policy" "${{ runner.temp }}/portcullis-netnslab-policy" "${{ runner.temp }}/portcullis-verify"
+
+  e2e:
+    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install disposable namespace prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nftables iproute2 iputils-ping conntrack busybox curl
+      - name: Compile Formnext processes
+        run: |
+          mkdir -p "${{ runner.temp }}/formnext-bin"
+          for cmd in portcullisd portcullis-portal portcullisctl; do
+            go build -o "${{ runner.temp }}/formnext-bin/$cmd" "./cmd/$cmd"
+          done
+      - name: Formnext kernel end-to-end tests
+        run: sudo env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted bash tests/netns/e2e.sh "${{ runner.temp }}/formnext-bin"
+      - name: Disposable demo launcher lifecycle
+        run: |
+          set -euo pipefail
+          trap 'sudo bash demo/portcullis-lab.sh down' EXIT
+          sudo bash demo/portcullis-lab.sh up "${{ runner.temp }}/formnext-bin"
+          sudo bash demo/portcullis-lab.sh status > "${{ runner.temp }}/portcullis-demo.status"
+          sudo ip netns exec pcdemo-gw /run/portcullis-demo/bin/portcullisctl \
+            -config /run/portcullis-demo/portcullis.json snapshot | python3 -c \
+            'import json,sys; s=json.load(sys.stdin); assert s["ok"] and s["snapshot"]["enforcement"]=="ok",s'
+          controller_pid=$(sudo cat /run/portcullis-demo/portcullisd.pid)
+          sudo sh -c 'kill -0 "$1"' sh "$controller_pid"
+          if sudo bash demo/portcullis-lab.sh restart > "${{ runner.temp }}/restart-refusal.log" 2>&1; then
+            echo "danger: live-controller restart succeeded" >&2
+            exit 1
+          fi
+          grep -q 'controller is already running' "${{ runner.temp }}/restart-refusal.log"
+          sudo sh -c 'kill -0 "$1"' sh "$controller_pid"
+          sudo bash demo/portcullis-lab.sh status > /dev/null
+          # A deliberate crash must leave the kernel evidence available, but
+          # snapshot health must be visibly marked unavailable.
+          sudo bash demo/portcullis-lab.sh crash
+          sudo bash demo/portcullis-lab.sh status > "${{ runner.temp }}/crashed-status.log" 2> "${{ runner.temp }}/crashed-status.err"
+          grep -q 'controller snapshot unavailable' "${{ runner.temp }}/crashed-status.err"
+          grep -q 'granted_dst_v4' "${{ runner.temp }}/crashed-status.log"
+          sudo bash demo/portcullis-lab.sh restart
+          sudo ip netns exec pcdemo-gw /run/portcullis-demo/bin/portcullisctl \
+            -config /run/portcullis-demo/portcullis.json snapshot | python3 -c \
+            'import json,sys; s=json.load(sys.stdin); assert s["ok"] and s["snapshot"]["enforcement"]=="ok",s'
+          tracked_pids=$(sudo sh -c 'cat /run/portcullis-demo/*.pid')
+          sudo bash demo/portcullis-lab.sh down
+          test ! -e /run/portcullis-demo
+          if sudo ip netns list | grep -q '^pcdemo-'; then
+            echo "danger: demo namespaces survived teardown" >&2
+            exit 1
+          fi
+          for pid in $tracked_pids; do
+            for attempt in {1..30}; do
+              if ! ps -p "$pid" -o stat= | grep -qE '^[[:space:]]*[^Z[:space:]]'; then break; fi
+              sleep 0.1
+            done
+            if ps -p "$pid" -o stat= | grep -qE '^[[:space:]]*[^Z[:space:]]'; then
+              echo "danger: demo process $pid survived teardown" >&2
+              exit 1
+            fi
+          done
+          trap - EXIT
