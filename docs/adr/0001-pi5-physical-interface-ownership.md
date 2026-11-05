@@ -12,7 +12,7 @@ The current `portcullisd bootstrap` requires a DOWN guest link and an absent gua
 
 This ADR proposes a host adapter and test strategy. It does **not** change the core controller, install services, assign interfaces, modify nftables, expose an AP, or authorize testing on the real Pi.
 
-References: [Formnext design](../formnext-design.md), [integration evidence](../formnext-integration.md), [ARM64 report](../pi5-arm64-bringup.md) (on the unmerged bring-up branch), [#5](https://github.com/thetechbenders/portcullis/issues/5), [#9](https://github.com/thetechbenders/portcullis/issues/9), [#11](https://github.com/thetechbenders/portcullis/issues/11), [#12](https://github.com/thetechbenders/portcullis/issues/12), [#13](https://github.com/thetechbenders/portcullis/issues/13).
+References: [Formnext design](../formnext-design.md), [integration evidence](../formnext-integration.md), [ARM64 report in PR #17](https://github.com/thetechbenders/portcullis/pull/17) (unmerged), [#5](https://github.com/thetechbenders/portcullis/issues/5), [#9](https://github.com/thetechbenders/portcullis/issues/9), [#11](https://github.com/thetechbenders/portcullis/issues/11), [#12](https://github.com/thetechbenders/portcullis/issues/12), [#13](https://github.com/thetechbenders/portcullis/issues/13).
 
 ## Proposed decision
 
