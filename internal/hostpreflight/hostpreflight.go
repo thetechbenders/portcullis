@@ -52,19 +52,19 @@ type Route struct {
 }
 
 type Snapshot struct {
-	BootID         string      `json:"boot_id,omitempty"`
-	ObservedAt     string      `json:"observed_at"`
-	IPv4Forwarding *bool       `json:"ipv4_forwarding,omitempty"`
-	IPv6Forwarding *bool       `json:"ipv6_forwarding,omitempty"`
-	IPv6Unavailable bool `json:"ipv6_unavailable,omitempty"`
-	Routes         []Route     `json:"routes"`
-	Hostname       string      `json:"hostname,omitempty"`
-	OS             string      `json:"os"`
-	Arch           string      `json:"arch"`
-	Kernel         string      `json:"kernel,omitempty"`
-	Interfaces     []Interface `json:"interfaces"`
-	DefaultRoutes  []Route     `json:"default_routes"`
-	InventoryError []string    `json:"inventory_errors"`
+	BootID          string      `json:"boot_id,omitempty"`
+	ObservedAt      string      `json:"observed_at"`
+	IPv4Forwarding  *bool       `json:"ipv4_forwarding,omitempty"`
+	IPv6Forwarding  *bool       `json:"ipv6_forwarding,omitempty"`
+	IPv6Unavailable bool        `json:"ipv6_unavailable,omitempty"`
+	Routes          []Route     `json:"routes"`
+	Hostname        string      `json:"hostname,omitempty"`
+	OS              string      `json:"os"`
+	Arch            string      `json:"arch"`
+	Kernel          string      `json:"kernel,omitempty"`
+	Interfaces      []Interface `json:"interfaces"`
+	DefaultRoutes   []Route     `json:"default_routes"`
+	InventoryError  []string    `json:"inventory_errors"`
 }
 
 // Selection is an *expected* topology supplied by an operator. No device is
@@ -149,11 +149,15 @@ func Collect() Snapshot {
 			}
 			item.MACAssignType = readIntSysctl(filepath.Join(base, "addr_assign_type"), &s.InventoryError)
 			item.IPv4Forwarding = readBoolSysctl(filepath.Join("/proc/sys/net/ipv4/conf", ni.Name, "forwarding"), &s.InventoryError)
-			if !s.IPv6Unavailable { item.IPv6Forwarding = readBoolSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "forwarding"), &s.InventoryError) }
+			if !s.IPv6Unavailable {
+				item.IPv6Forwarding = readBoolSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "forwarding"), &s.InventoryError)
+			}
 			// force_forwarding is kernel-version dependent; missing is explicitly unassessed, not silently false.
-			if !s.IPv6Unavailable { if _, err := os.Stat(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "force_forwarding")); err == nil {
-				item.IPv6ForceForwarding = readBoolSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "force_forwarding"), &s.InventoryError)
-			} }
+			if !s.IPv6Unavailable {
+				if _, err := os.Stat(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "force_forwarding")); err == nil {
+					item.IPv6ForceForwarding = readBoolSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "force_forwarding"), &s.InventoryError)
+				}
+			}
 			if path, err := filepath.EvalSymlinks(filepath.Join(base, "device/driver")); err == nil {
 				item.Driver = filepath.Base(path)
 			}
@@ -222,11 +226,22 @@ func Collect() Snapshot {
 		return a.Family < b.Family
 	})
 	// Detect interface churn across the observation window, not just within one NIC read.
-	if after, err := net.Interfaces(); err != nil { s.InventoryError = append(s.InventoryError, "interface re-enumeration: "+err.Error()) } else {
+	if after, err := net.Interfaces(); err != nil {
+		s.InventoryError = append(s.InventoryError, "interface re-enumeration: "+err.Error())
+	} else {
 		before := map[string]int{}
-		for _, nic := range s.Interfaces { before[nic.Name] = nic.Index }
-		if len(after) != len(before) { s.InventoryError = append(s.InventoryError, "interface inventory changed during collection") } else {
-			for _, nic := range after { if before[nic.Name] != nic.Index { s.InventoryError = append(s.InventoryError, "interface inventory changed during collection"); break } }
+		for _, nic := range s.Interfaces {
+			before[nic.Name] = nic.Index
+		}
+		if len(after) != len(before) {
+			s.InventoryError = append(s.InventoryError, "interface inventory changed during collection")
+		} else {
+			for _, nic := range after {
+				if before[nic.Name] != nic.Index {
+					s.InventoryError = append(s.InventoryError, "interface inventory changed during collection")
+					break
+				}
+			}
 		}
 	}
 	sort.Slice(s.DefaultRoutes, func(i, j int) bool {
