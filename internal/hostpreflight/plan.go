@@ -105,7 +105,9 @@ func ValidateSelection(sel Selection) (Selection, error) {
 			return Selection{}, fmt.Errorf("host plan requires a six-byte unicast %s MAC pin", pin.role)
 		}
 		*pin.mac = mac.String()
-		if seenMAC[*pin.mac] { return Selection{}, errors.New("host plan assigns one MAC to multiple roles") }
+		if seenMAC[*pin.mac] {
+			return Selection{}, errors.New("host plan assigns one MAC to multiple roles")
+		}
 		seenMAC[*pin.mac] = true
 		if !strings.HasPrefix(pin.path, "/sys/devices/") ||
 			strings.HasPrefix(pin.path, "/sys/devices/virtual/") ||
@@ -114,7 +116,9 @@ func ValidateSelection(sel Selection) (Selection, error) {
 			strings.ContainsAny(pin.path, "\x00\n\r") {
 			return Selection{}, fmt.Errorf("host plan requires a canonical physical %s sysfs parent path", pin.role)
 		}
-		if seenPath[pin.path] { return Selection{}, errors.New("host plan assigns one physical device path to multiple roles") }
+		if seenPath[pin.path] {
+			return Selection{}, errors.New("host plan assigns one physical device path to multiple roles")
+		}
 		seenPath[pin.path] = true
 	}
 	return sel, nil
