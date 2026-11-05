@@ -81,7 +81,7 @@ func ParsePlan(data []byte) (Selection, error) {
 // ValidateSelection is shared by plan and individual CLI flags.
 func ValidateSelection(sel Selection) (Selection, error) {
 	for _, name := range []string{sel.Guest, sel.Uplink, sel.Management} {
-		if !interfaceName.MatchString(name) {
+		if !interfaceName.MatchString(name) || name == "lo" || name == "all" || name == "default" {
 			return Selection{}, fmt.Errorf("invalid or missing interface name %q", name)
 		}
 	}
@@ -97,12 +97,16 @@ func ValidateSelection(sel Selection) (Selection, error) {
 		{"uplink", &sel.PinnedUplinkMAC, sel.PinnedUplinkSysfs},
 		{"management", &sel.PinnedManagementMAC, sel.PinnedManagementSysfs},
 	}
+	seenMAC := map[string]bool{}
+	seenPath := map[string]bool{}
 	for _, pin := range pins {
 		mac, err := net.ParseMAC(*pin.mac)
-		if err != nil || len(mac) != 6 || mac[0]&1 != 0 {
+		if err != nil || len(mac) != 6 || mac[0]&1 != 0 || bytes.Equal(mac, make([]byte, 6)) {
 			return Selection{}, fmt.Errorf("host plan requires a six-byte unicast %s MAC pin", pin.role)
 		}
 		*pin.mac = mac.String()
+		if seenMAC[*pin.mac] { return Selection{}, errors.New("host plan assigns one MAC to multiple roles") }
+		seenMAC[*pin.mac] = true
 		if !strings.HasPrefix(pin.path, "/sys/devices/") ||
 			strings.HasPrefix(pin.path, "/sys/devices/virtual/") ||
 			strings.Contains(pin.path, "/net/") ||
@@ -110,6 +114,8 @@ func ValidateSelection(sel Selection) (Selection, error) {
 			strings.ContainsAny(pin.path, "\x00\n\r") {
 			return Selection{}, fmt.Errorf("host plan requires a canonical physical %s sysfs parent path", pin.role)
 		}
+		if seenPath[pin.path] { return Selection{}, errors.New("host plan assigns one physical device path to multiple roles") }
+		seenPath[pin.path] = true
 	}
 	return sel, nil
 }
