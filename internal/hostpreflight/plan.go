@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 )
 
 const maxPlanBytes = 8192
@@ -27,18 +28,24 @@ type Plan struct {
 // LoadPlan reads a small local manifest without following it with any side
 // effect. The caller is responsible for keeping manifests private.
 func LoadPlan(path string) (Selection, error) {
-	info, err := os.Lstat(path)
+	// Open first, nonblocking and without following the final symlink, then
+	// inspect the opened descriptor. This closes the Lstat/Open FIFO-swap race.
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return Selection{}, err
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
-		return Selection{}, errors.New("host plan must be a regular non-writable-by-others file (symlinks and FIFOs refused)")
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return Selection{}, err
-	}
+	f := os.NewFile(uintptr(fd), path)
 	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return Selection{}, err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+		return Selection{}, errors.New("host plan must be a private regular file (mode 0600 or stricter; symlinks and FIFOs refused)")
+	}
+	if stat, ok := info.Sys().(*syscall.Stat_t); !ok || (stat.Uid != uint32(os.Geteuid()) && stat.Uid != 0) {
+		return Selection{}, errors.New("host plan must be owned by the invoking user or root")
+	}
 	data, err := io.ReadAll(io.LimitReader(f, maxPlanBytes+1))
 	if err != nil {
 		return Selection{}, err
