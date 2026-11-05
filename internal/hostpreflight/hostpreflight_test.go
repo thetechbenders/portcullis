@@ -10,15 +10,20 @@ import (
 	"testing"
 )
 
+func boolPtr(v bool) *bool { return &v }
+func intPtr(v int) *int { return &v }
+
 func fixture() (Snapshot, Selection) {
 	s := Snapshot{
 		OS: "linux", Arch: "arm64", Kernel: "6.18.50+rpt-rpi-2712",
+		IPv4Forwarding: boolPtr(false), IPv6Forwarding: boolPtr(false),
 		Interfaces: []Interface{
-			{Name: "eth0", Index: 2, MAC: "dc:a6:32:aa:bb:cc", Up: true, SysfsPath: "/sys/devices/platform/soc/eth0", Uppers: []string{}, Addresses: []string{"192.168.1.20/24"}},
-			{Name: "usb0", Index: 4, MAC: "02:22:33:44:55:66", Up: false, SysfsPath: "/sys/devices/pci0000/usb0", Uppers: []string{}, Addresses: []string{}},
+			{Name: "eth0", Index: 2, MAC: "dc:a6:32:aa:bb:cc", Up: true, SysfsPath: "/sys/devices/platform/soc/eth0", Uppers: []string{}, Addresses: []string{"198.18.0.1/24"}},
+			{Name: "usb0", Index: 4, MAC: "02:22:33:44:55:66", Up: false, SysfsPath: "/sys/devices/pci0000/usb0", Uppers: []string{}, Addresses: []string{}, IPv6Disabled: boolPtr(true), AcceptRA: intPtr(0), MACAssignType: intPtr(0)},
 			{Name: "wlan0", Index: 3, MAC: "dc:a6:32:bb:cc:dd", Up: true, SysfsPath: "/sys/devices/platform/soc/wlan0", Uppers: []string{}, Addresses: []string{"192.168.1.119/24"}},
 		},
-		DefaultRoutes:  []Route{{Family: "ipv4", Interface: "wlan0"}},
+		DefaultRoutes:  []Route{{Family: "ipv4", Interface: "eth0", Destination: "0.0.0.0/0", Default: true}},
+		Routes: []Route{{Family: "ipv4", Interface: "eth0", Destination: "0.0.0.0/0", Default: true}},
 		InventoryError: []string{},
 	}
 	sel := Selection{Guest: "usb0", Uplink: "eth0", Management: "wlan0", PinnedGuestMAC: "02:22:33:44:55:66", PinnedGuestSysfs: "/sys/devices/pci0000/usb0"}
@@ -27,31 +32,25 @@ func fixture() (Snapshot, Selection) {
 
 func codes(r Report) []string {
 	out := []string{}
-	for _, f := range r.Findings {
+	for _, f := range r.Hazards {
 		out = append(out, f.Code)
 	}
 	return out
 }
 
-func TestBaselineRemainsBlocked(t *testing.T) {
+func TestBaselineHasNoObservedHazardsButDoesNotAssessSafety(t *testing.T) {
 	s, sel := fixture()
 	r := Evaluate(s, sel)
-	if r.Status != "blocked" || r.DeploymentAuthorized || !r.ReadOnly || r.SchemaVersion != SchemaVersion {
-		t.Fatalf("preflight must never authorize deployment: %+v", r)
+	if len(r.Hazards) != 0 || len(r.NotAssessed) != 5 || r.SchemaVersion != SchemaVersion {
+		t.Fatalf("clean observable fixture must retain unresolved safety gates: %+v", r)
 	}
-	expected := []string{"manager_ownership_unverified", "kernel_guard_unverified", "physical_gate_unverified", "recovery_unverified", "physical_acceptance_outstanding"}
-	if got := codes(r); !slices.Equal(got, expected) {
-		t.Fatalf("unexpected baseline blockers:\n got %v\nwant %v", got, expected)
-	}
-	if len(r.Snapshot.Interfaces) != 3 {
-		t.Fatal("snapshot omitted interface inventory")
+	if r.PlanSHA256 == "" {
+		t.Fatal("missing plan digest")
 	}
 	b, err := json.Marshal(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(b), "\"deployment_authorized\":false") {
-		t.Fatalf("JSON did not carry explicit authorization=false: %s", b)
+	if err != nil { t.Fatal(err) }
+	if strings.Contains(string(b), "deployment_authorized") || strings.Contains(string(b), "\"status\"") {
+		t.Fatalf("inventory assessment must not grant or imply activation authority: %s", b)
 	}
 }
 
@@ -70,8 +69,8 @@ func TestPhysicalPreflightHazards(t *testing.T) {
 		{"guest MAC missing", "guest_mac_unpinned", func(_ *Snapshot, sel *Selection) { sel.PinnedGuestMAC = "" }},
 		{"guest sysfs identity mismatch", "guest_path_mismatch", func(_ *Snapshot, sel *Selection) { sel.PinnedGuestSysfs = "/not/the/device" }},
 		{"guest sysfs identity missing", "guest_path_unpinned", func(_ *Snapshot, sel *Selection) { sel.PinnedGuestSysfs = "" }},
-		{"IPv4 default through guest", "guest_default_route", func(s *Snapshot, _ *Selection) { s.DefaultRoutes = []Route{{Family: "ipv4", Interface: "usb0"}} }},
-		{"IPv6 default through guest", "guest_default_route", func(s *Snapshot, _ *Selection) { s.DefaultRoutes = []Route{{Family: "ipv6", Interface: "usb0"}} }},
+		{"IPv4 default through guest", "guest_route", func(s *Snapshot, _ *Selection) { s.Routes = []Route{{Family: "ipv4", Interface: "usb0", Destination: "0.0.0.0/0", Default: true}} }},
+		{"IPv6 default through guest", "guest_route", func(s *Snapshot, _ *Selection) { s.Routes = []Route{{Family: "ipv6", Interface: "usb0", Destination: "::/0", Default: true}} }},
 		{"management down", "management_inactive", func(s *Snapshot, _ *Selection) { s.Interfaces[2].Up = false }},
 		{"management unaddressed", "management_inactive", func(s *Snapshot, _ *Selection) { s.Interfaces[2].Addresses = nil }},
 		{"missing guest NIC", "interface_missing", func(s *Snapshot, _ *Selection) { s.Interfaces = s.Interfaces[:1] }},
@@ -79,6 +78,15 @@ func TestPhysicalPreflightHazards(t *testing.T) {
 		{"unselected interfaces", "interfaces_not_selected", func(_ *Snapshot, sel *Selection) { sel.Management = "" }},
 		{"incomplete proc inventory", "inventory_incomplete", func(s *Snapshot, _ *Selection) { s.InventoryError = []string{"routes ipv6: permission denied"} }},
 		{"non Pi arch", "unverified_target_arch", func(s *Snapshot, _ *Selection) { s.Arch = "amd64" }},
+		{"IPv4 forwarding active", "ipv4_forwarding_active_or_unknown", func(s *Snapshot, _ *Selection) { s.IPv4Forwarding = boolPtr(true) }},
+		{"IPv6 forwarding active", "ipv6_forwarding_active_or_unknown", func(s *Snapshot, _ *Selection) { s.IPv6Forwarding = boolPtr(true) }},
+		{"guest IPv6 enabled", "guest_ipv6_enabled", func(s *Snapshot, _ *Selection) { s.Interfaces[1].IPv6Disabled = boolPtr(false) }},
+		{"guest accepts RAs", "guest_accept_ra", func(s *Snapshot, _ *Selection) { s.Interfaces[1].AcceptRA = intPtr(1) }},
+		{"guest MAC modified", "guest_mac_not_permanent", func(s *Snapshot, _ *Selection) { s.Interfaces[1].MACAssignType = intPtr(3) }},
+		{"virtual guest NIC", "virtual_guest_interface", func(s *Snapshot, _ *Selection) { s.Interfaces[1].SysfsPath = "/sys/devices/virtual/net/usb0" }},
+		{"uplink overlaps management", "management_uplink_overlap", func(s *Snapshot, _ *Selection) { s.Interfaces[0].Addresses = []string{"192.168.1.50/24"} }},
+		{"default route through management", "default_route_not_uplink", func(s *Snapshot, _ *Selection) { s.Routes = []Route{{Family:"ipv4",Interface:"wlan0",Default:true}} }},
+		{"guest has non-default route", "guest_route", func(s *Snapshot, _ *Selection) { s.Routes = []Route{{Family:"ipv4",Interface:"usb0",Destination:"10.0.0.0/8"}} }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -88,8 +96,8 @@ func TestPhysicalPreflightHazards(t *testing.T) {
 			if !slices.Contains(codes(r), tc.blocker) {
 				t.Fatalf("expected %q in %v", tc.blocker, codes(r))
 			}
-			if r.DeploymentAuthorized || r.Status != "blocked" {
-				t.Fatal("a hazardous topology must not authorize deployment")
+			if len(r.Hazards) == 0 {
+				t.Fatal("hazardous topology must produce a specific finding")
 			}
 		})
 	}
@@ -97,8 +105,7 @@ func TestPhysicalPreflightHazards(t *testing.T) {
 
 func TestEmptySnapshotNeverBecomesSafe(t *testing.T) {
 	r := Evaluate(Snapshot{}, Selection{})
-	if r.DeploymentAuthorized || r.Status != "blocked" ||
-		!slices.Contains(codes(r), "interfaces_not_selected") ||
+	if !slices.Contains(codes(r), "interfaces_not_selected") ||
 		!slices.Contains(codes(r), "unsupported_os") {
 		t.Fatalf("empty input unsafe: %+v", r)
 	}
@@ -140,7 +147,7 @@ func TestCollectorSmokeOnLinux(t *testing.T) {
 		t.Fatalf("collector did not report a loopback interface: %+v", s.Interfaces)
 	}
 	r := Evaluate(s, Selection{})
-	if r.DeploymentAuthorized || r.Status != "blocked" {
-		t.Fatal("observing a real Linux host must never authorize exposure")
+	if !slices.Contains(codes(r), "interfaces_not_selected") {
+		t.Fatal("an unselected real Linux host must report missing topology")
 	}
 }
