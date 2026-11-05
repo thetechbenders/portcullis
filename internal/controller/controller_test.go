@@ -277,7 +277,7 @@ func TestReconcileAttestFailureDegrades(t *testing.T) {
 	if d, reason := e.c.Degraded(); !d || reason == "" {
 		t.Fatal("not degraded")
 	}
-	if e.k.count("FlushGrants") != flushes+1 || e.fs.count() != 1 {
+	if e.k.count("FlushGrants") != flushes+1 || e.fs.count() != 2 {
 		t.Fatalf("flush=%d failsafe=%d", e.k.count("FlushGrants")-flushes, e.fs.count())
 	}
 	if g, d := e.k.grantCounts(); g+d != 0 || !e.fl.has(addrA) {
