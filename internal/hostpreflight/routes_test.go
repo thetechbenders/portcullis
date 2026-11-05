@@ -41,7 +41,10 @@ func TestProcRoutesIPv4FlagsAndSpecificRoute(t *testing.T) {
 }
 
 func TestMalformedProcRoutesFailRatherThanInventEmpty(t *testing.T) {
-	for _, tc := range []struct{ family string; lines []string }{
+	for _, tc := range []struct {
+		family string
+		lines  []string
+	}{
 		{"ipv4", []string{"eth0 0"}},
 		{"ipv4", []string{"eth0 00000000 00000000 invalid 0 0 0 00000000"}},
 		{"ipv6", []string{"bad"}},
