@@ -294,9 +294,60 @@ PY
    done
    (( down == 1 )) || die 'degraded controller did not reassert guest link isolation after re-UP'
  fi
- # With link down, no valid grant can be issued. Prove startup refuses too.
+ # A failed startup stays alive to retry verified link isolation. Do not
+ # wait for a prompt exit: this terminal safety loop ends only on shutdown.
  stop_controller
- if gw "$state/bin/portcullisd" run -config "$state/portcullis.json"; then die "$kind startup accepted"; fi
+ rm -f "$state/failed-start.ready"
+ start_bg failed-start ip netns exec "$ns_gw" "$state/bin/portcullisd" run \
+   -config "$state/portcullis.json" -ready-file "$state/failed-start.ready"
+ local failed_pid seen_failure=0
+ failed_pid="$(cat "$state/failed-start.pid")"
+ for _ in {1..100}; do
+   if grep -q 'controller startup failed; guest authorization unavailable' "$state/failed-start.log"; then
+     seen_failure=1
+     break
+   fi
+   kill -0 "$failed_pid" 2>/dev/null || die "$kind failed startup exited without safety supervision"
+   sleep .1
+ done
+ (( seen_failure == 1 )) || die "$kind failed startup was not observed"
+ kill -0 "$failed_pid" 2>/dev/null || die "$kind failed-start supervisor exited"
+ [[ ! -e "$state/failed-start.ready" ]] || die "$kind failed startup published readiness"
+ python3 - "$state/guest.sock" "$state/operator.sock" <<'PY'
+import errno, socket, sys
+for path in sys.argv[1:]:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        try:
+            client.connect(path)
+        except OSError as exc:
+            if exc.errno not in (errno.ENOENT, errno.ECONNREFUSED):
+                raise
+        else:
+            raise AssertionError(f"failed startup still serving socket: {path}")
+PY
+ ip -n "$ns_gw" -j link show guest0 | python3 -c \
+   'import json,sys; assert "UP" not in json.load(sys.stdin)[0]["flags"]'
+ if [[ $kind == hook ]]; then
+   # Test re-isolation during *failed startup*, separately from the normal
+   # degraded controller reactivation test earlier in this mutation.
+   ip -n "$ns_gw" link set guest0 up
+   local isolated_again=0
+   for _ in {1..100}; do
+     kill -0 "$failed_pid" 2>/dev/null || die 'failed-start supervisor exited during re-isolation'
+     if ip -n "$ns_gw" -j link show guest0 | python3 -c \
+       'import json,sys; assert "UP" not in json.load(sys.stdin)[0]["flags"]' 2>/dev/null; then
+       isolated_again=1
+       break
+     fi
+     sleep .1
+   done
+   (( isolated_again == 1 )) || die 'failed-start supervisor did not re-isolate reactivated guest link'
+ fi
+ kill -TERM "$failed_pid"
+ if wait "$failed_pid"; then die "$kind failed startup returned successful process status"; fi
+ grep -q 'portcullisd: refusing to serve: enforcement degraded' "$state/failed-start.log" \
+   || die "$kind failed startup lost original attestation failure"
+ rm -f "$state/failed-start.pid"
  ip -n "$ns_gw" link del upper0 2>/dev/null || true
  # Table replacement is solely an offline test reset with guest link DOWN.
  gw nft delete table inet portcullis_guard
