@@ -191,7 +191,11 @@ EOF
 }
 
 cmd_status() {
-  ip netns exec $ns_gw "$state/bin/portcullisctl" -config "$state/portcullis.json" snapshot
+  # Preserve the kernel evidence view after a deliberate daemon crash.
+  # CI checks controller health separately: an offline snapshot is NOT healthy.
+  if ! ip netns exec $ns_gw "$state/bin/portcullisctl" -config "$state/portcullis.json" snapshot; then
+    echo "controller snapshot unavailable; kernel-only evidence follows" >&2
+  fi
   echo "--- kernel grant sets (authoritative) ---"
   ip netns exec $ns_gw nft list set inet portcullis_guard granted_v4
   ip netns exec $ns_gw nft list set inet portcullis_guard granted_dst_v4
