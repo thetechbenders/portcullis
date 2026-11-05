@@ -195,6 +195,7 @@ func TestGloballyUnavailableIPv6IsNotAFalseAlarm(t *testing.T) {
 		t.Fatalf("disabled IPv6 should not cause hazards: %v", got)
 	}
 }
+
 func TestRedactedReportKeepsPseudonymousBootCorrelation(t *testing.T) {
 	s, sel := fixture()
 	s.BootID = "private-boot-id"
@@ -232,10 +233,10 @@ func TestMissingIPv6RouteProcfsOnlyAllowedWhenIPv6Unavailable(t *testing.T) {
 
 func TestDefaultForwardingHazards(t *testing.T) {
 	tests := []struct {
-		name string
-		ipv4, ipv6 bool
+		name        string
+		ipv4, ipv6  bool
 		unavailable bool
-		want string
+		want        string
 	}{
 		{"IPv4 inherited forwarding", true, false, false, "ipv4_default_forwarding_enabled"},
 		{"IPv6 inherited forwarding", false, true, false, "ipv6_default_forwarding_enabled"},
