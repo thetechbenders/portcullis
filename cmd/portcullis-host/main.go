@@ -1,65 +1,82 @@
-// Command portcullis-host emits a read-only, non-authorizing host preflight.
-// It cannot install, start or change any network service or interface.
+// Command portcullis-host inspects a Linux host without mutating networking.
 package main
 
 import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/thetechbenders/portcullis/internal/hostpreflight"
 )
 
 func main() {
-	if len(os.Args) < 2 || os.Args[1] != "preflight" {
-		usage()
-	}
-	fs := flag.NewFlagSet("preflight", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	guest := fs.String("guest", "", "operator-nominated guest interface")
-	uplink := fs.String("uplink", "", "operator-nominated uplink interface")
-	management := fs.String("management", "", "operator-nominated management interface")
-	mac := fs.String("pinned-guest-mac", "", "expected guest interface MAC (never autodetected as authority)")
-	path := fs.String("pinned-guest-sysfs", "", "expected canonical guest /sys/class/net target")
-	planPath := fs.String("plan", "", "versioned, operator-pinned JSON host plan (read-only)")
-	dryRun := fs.Bool("dry-run", true, "read-only inventory; must stay true")
-	if err := fs.Parse(os.Args[2:]); err != nil {
-		os.Exit(2)
-	}
-	if fs.NArg() != 0 || !*dryRun {
-		fmt.Fprintln(os.Stderr, "portcullis-host: preflight accepts no positional arguments or mutation mode")
-		os.Exit(2)
-	}
-	selected := hostpreflight.Selection{
-		Guest: *guest, Uplink: *uplink, Management: *management,
-		PinnedGuestMAC: *mac, PinnedGuestSysfs: *path,
-	}
-	if *planPath != "" {
-		if *guest != "" || *uplink != "" || *management != "" || *mac != "" || *path != "" {
-			fmt.Fprintln(os.Stderr, "portcullis-host: -plan cannot be combined with individual interface flags")
-			os.Exit(2)
-		}
-		var err error
-		selected, err = hostpreflight.LoadPlan(*planPath)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "portcullis-host: invalid host plan:", err)
-			os.Exit(2)
-		}
-	}
-	report := hostpreflight.Evaluate(hostpreflight.Collect(), selected)
-	e := json.NewEncoder(os.Stdout)
-	e.SetIndent("", "  ")
-	if err := e.Encode(report); err != nil {
-		fmt.Fprintln(os.Stderr, "portcullis-host: cannot encode report:", err)
-		os.Exit(1)
-	}
-	// Exit 3 is deliberate, even when all observational checks are clear:
-	// physical isolation, live policy attestation and recovery are unverified.
-	os.Exit(3)
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, hostpreflight.Collect))
 }
 
-func usage() {
-	fmt.Fprintln(os.Stderr, "usage: portcullis-host preflight [-dry-run] [-plan FILE] [-guest IFACE] [-uplink IFACE] [-management IFACE] [-pinned-guest-mac MAC] [-pinned-guest-sysfs PATH]")
-	os.Exit(2)
+// run is independently testable without invoking any privileged service or
+// touching a live interface. Nothing from this CLI authorizes activation.
+func run(args []string, out io.Writer, diag io.Writer, collect func() hostpreflight.Snapshot) int {
+	if len(args) == 0 || (args[0] != "inventory" && args[0] != "check") {
+		fmt.Fprintln(diag, "usage: portcullis-host inventory [-private] | check -plan FILE [-private]")
+		return 2
+	}
+	mode := args[0]
+	fs := flag.NewFlagSet(mode, flag.ContinueOnError)
+	fs.SetOutput(diag)
+	private := fs.Bool("private", false, "include sensitive device, network and plan identifiers in output")
+	planPath := fs.String("plan", "", "strict versioned operator-pinned host plan (check only)")
+	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
+		return 2
+	}
+	if mode == "inventory" && *planPath != "" {
+		fmt.Fprintln(diag, "inventory cannot select or validate a deployment plan")
+		return 2
+	}
+	if mode == "check" && *planPath == "" {
+		fmt.Fprintln(diag, "check requires -plan FILE")
+		return 2
+	}
+	var sel hostpreflight.Selection
+	if mode == "check" {
+		var err error
+		sel, err = hostpreflight.LoadPlan(*planPath)
+		if err != nil {
+			fmt.Fprintln(diag, "invalid host plan:", err)
+			return 2
+		}
+	}
+	snapshot := collect()
+	encoder := json.NewEncoder(out)
+	encoder.SetIndent("", "  ")
+	if mode == "inventory" {
+		if !*private {
+			snapshot = hostpreflight.RedactSnapshot(snapshot)
+		}
+		if err := encoder.Encode(snapshot); err != nil {
+			fmt.Fprintln(diag, "cannot encode inventory:", err)
+			return 1
+		}
+		if len(snapshot.InventoryError) != 0 {
+			return 1
+		}
+		return 0
+	}
+	report := hostpreflight.Evaluate(snapshot, sel)
+	if !*private {
+		report.Selection.PinnedGuestMAC = ""
+		report.Selection.PinnedGuestSysfs = ""
+		report.BootID = ""
+	}
+	if err := encoder.Encode(report); err != nil {
+		fmt.Fprintln(diag, "cannot encode assessment:", err)
+		return 1
+	}
+	if len(report.Hazards) != 0 {
+		return 1
+	}
+	// Zero observed hazards is NOT readiness to enable the interface.
+	// See the independent unresolved gates in report.NotAssessed.
+	return 0
 }
