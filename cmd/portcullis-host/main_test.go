@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
- "errors"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,21 +98,24 @@ func TestCheckExitCodesAndMissingPlan(t *testing.T) {
 }
 
 type failingWriter struct{}
-func (failingWriter) Write([]byte) (int,error) { return 0, errors.New("closed output") }
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("closed output") }
 
 func TestOutputFailureHasDistinctExitCode(t *testing.T) {
- var diag bytes.Buffer
- if code := run([]string{"inventory"}, failingWriter{}, &diag, testSnapshot); code != 3 {
-  t.Fatalf("output failure must return 3, got %d", code)
- }
+	var diag bytes.Buffer
+	if code := run([]string{"inventory"}, failingWriter{}, &diag, testSnapshot); code != 3 {
+		t.Fatalf("output failure must return 3, got %d", code)
+	}
 }
 func TestMACEncodedInterfaceNamesRedacted(t *testing.T) {
- snap := testSnapshot()
- snap.Interfaces = append(snap.Interfaces, hostpreflight.Interface{Name:"enx001122aabbcc", Up:true})
- snap.Routes = append(snap.Routes, hostpreflight.Route{Family:"ipv4",Interface:"enx001122aabbcc",Destination:"10.0.0.0/8"})
- var out, diag bytes.Buffer
- if code := run([]string{"inventory"}, &out, &diag, func() hostpreflight.Snapshot {return snap}); code != 0 {
-  t.Fatalf("inventory failed: %d %s",code,diag.String())
- }
- if strings.Contains(out.String(),"001122aabbcc") { t.Fatalf("MAC leaked through interface name: %s",out.String()) }
+	snap := testSnapshot()
+	snap.Interfaces = append(snap.Interfaces, hostpreflight.Interface{Name: "enx001122aabbcc", Up: true})
+	snap.Routes = append(snap.Routes, hostpreflight.Route{Family: "ipv4", Interface: "enx001122aabbcc", Destination: "10.0.0.0/8"})
+	var out, diag bytes.Buffer
+	if code := run([]string{"inventory"}, &out, &diag, func() hostpreflight.Snapshot { return snap }); code != 0 {
+		t.Fatalf("inventory failed: %d %s", code, diag.String())
+	}
+	if strings.Contains(out.String(), "001122aabbcc") {
+		t.Fatalf("MAC leaked through interface name: %s", out.String())
+	}
 }
