@@ -173,7 +173,18 @@ type LinkFailsafe struct {
 	Interface string
 }
 
-// Engage implements controller.Failsafe.
+// Engage implements controller.Failsafe. Exit status alone is not evidence:
+// read the actual administrative UP flag back from the kernel.
 func (l LinkFailsafe) Engage(ctx context.Context, reason string) error {
-	return l.Link.SetDown(ctx, l.Interface)
+	if err := l.Link.SetDown(ctx, l.Interface); err != nil {
+		return err
+	}
+	info, err := l.Link.Inspect(ctx, l.Interface)
+	if err != nil {
+		return fmt.Errorf("verify guest link isolation: %w", err)
+	}
+	if info.Up {
+		return fmt.Errorf("%w: guest link %q still UP after isolation", kernel.ErrTopology, l.Interface)
+	}
+	return nil
 }

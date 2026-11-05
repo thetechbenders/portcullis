@@ -79,6 +79,7 @@ type Evidence interface {
 }
 
 // Failsafe isolates guests when the guard cannot be attested.
+// Engage must read back link state and succeed only when the link is DOWN.
 type Failsafe interface {
 	Engage(ctx context.Context, reason string) error
 }
@@ -143,6 +144,7 @@ type Controller struct {
 	bindings   Bindings
 	phase      phase
 	degraded   bool
+	isolated   bool // last attempted kernel readback confirmed guest link DOWN
 	reason     string
 	bindSeq    uint64
 	store      *lease.Store
@@ -323,7 +325,8 @@ func (c *Controller) startLocked(ctx context.Context) ([]model.Binding, error) {
 }
 
 // Run reconciles every ReconcileInterval until ctx is done. A degraded
-// controller keeps running (so operators can see why) but does nothing.
+// controller keeps running, refuses all authority, and reasserts link isolation
+// every tick. This also catches links that become UP after initial isolation.
 func (c *Controller) Run(ctx context.Context) error {
 	c.mu.Lock()
 	running := c.phase == phaseRunning
@@ -363,6 +366,11 @@ func (c *Controller) Reconcile(ctx context.Context) error {
 	consistent, err := c.lockAfterRead(func(bs Bindings) { list = bs.Bindings() })
 	defer c.mu.Unlock()
 	if err != nil {
+		if errors.Is(err, ErrDegraded) && ctx.Err() == nil {
+			// Reassert on every degraded tick, even after success: a privileged
+			// actor can bring the interface back up between checks.
+			c.engageIsolationLocked()
+		}
 		return err
 	}
 	ks, err := c.readKernelLocked(ctx, true, false)
@@ -538,29 +546,39 @@ func (c *Controller) readKernelLocked(ctx context.Context, full, mustSucceed boo
 	return ks, c.enforceGrantsLocked(ks)
 }
 
-// degradeLocked enters the terminal fail-closed state once: flush every
-// grant, flush flows, clear desired grants, engage the failsafe.
+// engageIsolationLocked attempts link isolation with a fresh bounded context.
+// It runs only under mu, and on every degraded reconcile tick as well as on
+// entry. The concrete failsafe verifies kernel link state after SetDown.
+func (c *Controller) engageIsolationLocked() {
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	err := c.failsafe.Engage(ctx, c.reason)
+	cancel()
+	wasIsolated := c.isolated
+	c.isolated = err == nil
+	switch {
+	case err != nil:
+		c.eventLocked("failsafe-failed", sanitize(err.Error(), 128))
+		if wasIsolated {
+			c.log.Error("previously confirmed guest isolation no longer verified", "err", err)
+		}
+	case !wasIsolated:
+		c.eventLocked("failsafe", "guest link DOWN verified after isolation")
+	}
+}
+
+// degradeLocked enters the terminal fail-closed state once. First isolate
+// guests, then log, flush grants and conntrack. If isolation fails, Run keeps
+// retrying and the operator snapshot explicitly reports it unconfirmed.
 func (c *Controller) degradeLocked(reason string) {
 	if c.degraded {
 		return
 	}
 	c.degraded = true
 	c.reason = sanitize(reason, 256)
+	// Do not let log output or potentially slow cleanup delay the failsafe.
+	c.engageIsolationLocked()
 	c.log.Error("enforcement degraded", "reason", c.reason)
 	c.eventLocked("degraded", c.reason)
-	// Isolate before attempting cleanup: an absent/dormant guard cannot
-	// protect packets while nft or conntrack cleanup is slow or failing.
-	// Its deadline is independent of all later cleanup operations.
-	if c.failsafe != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
-		err := c.failsafe.Engage(ctx, c.reason)
-		cancel()
-		if err != nil {
-			c.eventLocked("failsafe-failed", sanitize(err.Error(), 128))
-		} else {
-			c.eventLocked("failsafe", "guest isolation engaged")
-		}
-	}
 	addrs := map[netip.Addr]bool{}
 	for _, g := range c.grants {
 		addrs[g.addr] = true

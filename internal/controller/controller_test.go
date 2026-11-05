@@ -295,6 +295,44 @@ func TestReconcileAttestFailureDegrades(t *testing.T) {
 	}
 }
 
+func TestDegradedIsolationRetriesAndDetectsLoss(t *testing.T) {
+	e := newEnv(t)
+	e.start()
+	e.fs.fail(errInjected)
+	e.k.setFail("Attest", errInjected)
+	if err := e.c.Reconcile(context.Background()); !errors.Is(err, ErrDegraded) {
+		t.Fatal(err)
+	}
+	assertIsolation := func(want string, attempts int) {
+		t.Helper()
+		if e.fs.count() != attempts {
+			t.Fatalf("isolation attempts: got %d want %d", e.fs.count(), attempts)
+		}
+		resp := e.operator(ipc.OpSnapshot, "")
+		if !resp.OK || resp.Snapshot.Isolation != want {
+			t.Fatalf("isolation snapshot: got %+v want %s", resp, want)
+		}
+	}
+	assertIsolation("unconfirmed", 1)
+	e.fs.fail(nil)
+	if err := e.c.Reconcile(context.Background()); !errors.Is(err, ErrDegraded) {
+		t.Fatal(err)
+	}
+	assertIsolation("confirmed", 2)
+	// Even after success, a later failed reassertion must clear confirmation.
+	// This detects an interface that could have been brought back UP.
+	e.fs.fail(errInjected)
+	if err := e.c.Reconcile(context.Background()); !errors.Is(err, ErrDegraded) {
+		t.Fatal(err)
+	}
+	assertIsolation("unconfirmed", 3)
+	e.fs.fail(nil)
+	if err := e.c.Reconcile(context.Background()); !errors.Is(err, ErrDegraded) {
+		t.Fatal(err)
+	}
+	assertIsolation("confirmed", 4)
+}
+
 func TestSnapshotFailureInStatusDegrades(t *testing.T) {
 	e := newEnv(t)
 	e.start()

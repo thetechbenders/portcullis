@@ -263,15 +263,22 @@ func (e *fakeEvidence) Corroborate(addr netip.Addr, b model.Binding) error {
 }
 
 type fakeFailsafe struct {
-	mu sync.Mutex
-	n  int
+	mu  sync.Mutex
+	n   int
+	err error
 }
 
 func (f *fakeFailsafe) Engage(context.Context, string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.n++
-	return nil
+	return f.err
+}
+
+func (f *fakeFailsafe) fail(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.err = err
 }
 
 func (f *fakeFailsafe) count() int { f.mu.Lock(); defer f.mu.Unlock(); return f.n }

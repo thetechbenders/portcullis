@@ -148,6 +148,7 @@ type Response struct {
 type Snapshot struct {
 	GeneratedAt     time.Time     `json:"generated_at"`
 	Enforcement     string        `json:"enforcement"` // "ok" or "degraded"
+	Isolation       string        `json:"isolation"`   // "not_required", "confirmed", "unconfirmed"
 	DegradedReason  string        `json:"degraded_reason,omitempty"`
 	LastAttestation time.Time     `json:"last_attestation"`
 	Bindings        []BindingView `json:"bindings"`

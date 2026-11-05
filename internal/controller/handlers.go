@@ -325,12 +325,16 @@ func (c *Controller) snapshot() ipc.Response {
 	now := c.now()
 	age := now.Sub(c.lastRead)
 	snap := &ipc.Snapshot{
-		GeneratedAt: now, Enforcement: "ok", LastAttestation: c.lastAttest,
+		GeneratedAt: now, Enforcement: "ok", Isolation: "not_required", LastAttestation: c.lastAttest,
 		Bindings: []ipc.BindingView{}, Grants: []ipc.GrantView{},
 		Counters: []ipc.CounterView{}, Events: c.eventsNewestFirstLocked(),
 	}
 	if c.degraded {
 		snap.Enforcement, snap.DegradedReason = "degraded", c.reason
+		snap.Isolation = "unconfirmed"
+		if c.isolated {
+			snap.Isolation = "confirmed"
+		}
 	}
 	for _, b := range list {
 		v := ipc.BindingView{Address: b.Addr.String(), MAC: b.MAC.String(),

@@ -131,8 +131,13 @@
     const hasAtt = Number.isFinite(att) && new Date(att).getUTCFullYear() > 1;
     const age = hasAtt && Number.isFinite(gen) ? Math.max(0, (gen - att) / 1000) : NaN;
     ui.enforcement.dataset.tone = !ok ? 'bad' : (!hasAtt || age > 10) ? 'warn' : 'ok';
-    ui.enfState.textContent = ok ? (hasAtt ? 'Verified' : 'Not yet attested') : 'DEGRADED: failing closed';
-    ui.enfReason.textContent = ok ? 'The kernel guard matched its expected structure.' : (s.degraded_reason || 'Attestation failed. Every request is refused until restart.');
+    const isolated = s.isolation === 'confirmed';
+    ui.enfState.textContent = ok ? (hasAtt ? 'Verified' : 'Not yet attested') :
+      (isolated ? 'DEGRADED: guest link DOWN at last check' : 'DEGRADED: ISOLATION UNCONFIRMED');
+    ui.enfReason.textContent = ok ? 'The kernel guard matched its expected structure.' :
+      (s.degraded_reason || 'Attestation failed.') +
+      (isolated ? ' Link-down verified on the last retry; access remains disabled.' :
+        ' Could not verify guest link-down. Do not assume traffic is blocked.');
     ui.attAge.textContent = Number.isFinite(age) ? age.toFixed(1) + ' s ago' : 'never';
     ui.snapTime.textContent = stamp(s.generated_at);
 
