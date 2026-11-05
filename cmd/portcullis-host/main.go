@@ -22,6 +22,7 @@ func main() {
 	management := fs.String("management", "", "operator-nominated management interface")
 	mac := fs.String("pinned-guest-mac", "", "expected guest interface MAC (never autodetected as authority)")
 	path := fs.String("pinned-guest-sysfs", "", "expected canonical guest /sys/class/net target")
+	planPath := fs.String("plan", "", "versioned, operator-pinned JSON host plan (read-only)")
 	dryRun := fs.Bool("dry-run", true, "read-only inventory; must stay true")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		os.Exit(2)
@@ -30,10 +31,23 @@ func main() {
 		fmt.Fprintln(os.Stderr, "portcullis-host: preflight accepts no positional arguments or mutation mode")
 		os.Exit(2)
 	}
-	report := hostpreflight.Evaluate(hostpreflight.Collect(), hostpreflight.Selection{
+	selected := hostpreflight.Selection{
 		Guest: *guest, Uplink: *uplink, Management: *management,
 		PinnedGuestMAC: *mac, PinnedGuestSysfs: *path,
-	})
+	}
+	if *planPath != "" {
+		if *guest != "" || *uplink != "" || *management != "" || *mac != "" || *path != "" {
+			fmt.Fprintln(os.Stderr, "portcullis-host: -plan cannot be combined with individual interface flags")
+			os.Exit(2)
+		}
+		var err error
+		selected, err = hostpreflight.LoadPlan(*planPath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "portcullis-host: invalid host plan:", err)
+			os.Exit(2)
+		}
+	}
+	report := hostpreflight.Evaluate(hostpreflight.Collect(), selected)
 	e := json.NewEncoder(os.Stdout)
 	e.SetIndent("", "  ")
 	if err := e.Encode(report); err != nil {
@@ -46,6 +60,6 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: portcullis-host preflight [-dry-run] [-guest IFACE] [-uplink IFACE] [-management IFACE] [-pinned-guest-mac MAC] [-pinned-guest-sysfs PATH]")
+	fmt.Fprintln(os.Stderr, "usage: portcullis-host preflight [-dry-run] [-plan FILE] [-guest IFACE] [-uplink IFACE] [-management IFACE] [-pinned-guest-mac MAC] [-pinned-guest-sysfs PATH]")
 	os.Exit(2)
 }
