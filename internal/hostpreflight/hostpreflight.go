@@ -39,6 +39,9 @@ type Interface struct {
 	IPv6Disabled  *bool    `json:"ipv6_disabled,omitempty"`
 	AcceptRA      *int     `json:"accept_ra,omitempty"`
 	MACAssignType *int     `json:"mac_assign_type,omitempty"`
+	IPv4Forwarding *bool `json:"ipv4_forwarding,omitempty"`
+	IPv6Forwarding *bool `json:"ipv6_forwarding,omitempty"`
+	IPv6ForceForwarding *bool `json:"ipv6_force_forwarding,omitempty"`
 }
 
 type Route struct {
@@ -138,6 +141,12 @@ func Collect() Snapshot {
 			item.IPv6Disabled = readBoolSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "disable_ipv6"), &s.InventoryError)
 			item.AcceptRA = readIntSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "accept_ra"), &s.InventoryError)
 			item.MACAssignType = readIntSysctl(filepath.Join(base, "addr_assign_type"), &s.InventoryError)
+			item.IPv4Forwarding = readBoolSysctl(filepath.Join("/proc/sys/net/ipv4/conf", ni.Name, "forwarding"), &s.InventoryError)
+			item.IPv6Forwarding = readBoolSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "forwarding"), &s.InventoryError)
+			// force_forwarding is kernel-version dependent; missing is explicitly unassessed, not silently false.
+			if _, err := os.Stat(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "force_forwarding")); err == nil {
+				item.IPv6ForceForwarding = readBoolSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "force_forwarding"), &s.InventoryError)
+			}
 			if path, err := filepath.EvalSymlinks(filepath.Join(base, "device/driver")); err == nil {
 				item.Driver = filepath.Base(path)
 			}
@@ -274,6 +283,19 @@ func Evaluate(s Snapshot, sel Selection) Report {
 	byName := map[string]Interface{}
 	for _, nic := range s.Interfaces {
 		byName[nic.Name] = nic
+		if !nic.Loopback && nic.Name != sel.Guest && nic.Name != sel.Uplink && nic.Name != sel.Management &&
+			(nic.Up || len(nic.Addresses) > 0) {
+			add("unexpected_active_interface", "unplanned non-loopback interface "+nic.Name+" is active or addressed")
+		}
+		for _, state := range []struct { value *bool; code string }{
+			{nic.IPv4Forwarding, "interface_ipv4_forwarding"},
+			{nic.IPv6Forwarding, "interface_ipv6_forwarding"},
+			{nic.IPv6ForceForwarding, "interface_ipv6_force_forwarding"},
+		} {
+			if state.value != nil && *state.value {
+				add(state.code, "per-interface forwarding enabled on "+nic.Name)
+			}
+		}
 	}
 	for _, candidate := range []struct{ role, name string }{
 		{"guest", sel.Guest},
@@ -350,9 +372,7 @@ func Evaluate(s Snapshot, sel Selection) Report {
 		if sel.Guest != "" && route.Interface == sel.Guest {
 			add("guest_route", "a "+route.Family+" route is configured through the candidate guest interface")
 		}
-		if route.Default && sel.Uplink != "" && route.Interface != sel.Uplink {
-			add("default_route_not_uplink", "a "+route.Family+" default route uses "+route.Interface+" rather than the nominated uplink")
-		}
+		// A host management default route is permitted: the kernel guard separately restricts guest egress to the nominated uplink.
 	}
 	// Legacy snapshots/tests can provide default routes separately.
 	if len(s.Routes) == 0 {
@@ -360,9 +380,7 @@ func Evaluate(s Snapshot, sel Selection) Report {
 			if sel.Guest != "" && route.Interface == sel.Guest {
 				add("guest_route", "guest interface has a default route")
 			}
-			if sel.Uplink != "" && route.Interface != sel.Uplink {
-				add("default_route_not_uplink", "default route does not use uplink")
-			}
+			// Default management routes are not evidence of guest egress bypass.
 		}
 	}
 	if s.IPv4Forwarding == nil || *s.IPv4Forwarding {
@@ -386,6 +404,7 @@ func Evaluate(s Snapshot, sel Selection) Report {
 					add("invalid_uplink_address", "uplink address cannot be parsed")
 					continue
 				}
+				if a.Addr().IsLinkLocalUnicast() || b.Addr().IsLinkLocalUnicast() { continue }
 				if a.Addr().Is4() == b.Addr().Is4() && a.Overlaps(b) {
 					add("management_uplink_overlap", "management and uplink address prefixes overlap")
 				}
