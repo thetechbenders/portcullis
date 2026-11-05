@@ -282,7 +282,8 @@ PY
  # its next reconcile tick, not rely on the one-shot result.
  if [[ $kind == hook ]]; then
    ip -n "$ns_gw" link set guest0 up
-   ip -n "$ns_gw" -j link show guest0 | python3 -c 'import json,sys; assert "UP" in json.load(sys.stdin)[0]["flags"]'
+   # The controller can win the race to re-isolate before an immediate
+   # inspection; successful ip link set UP is the actual activation stimulus.
    down=0
    for _ in {1..100}; do
      if ip -n "$ns_gw" -j link show guest0 | python3 -c 'import json,sys; assert "UP" not in json.load(sys.stdin)[0]["flags"]' 2>/dev/null; then
