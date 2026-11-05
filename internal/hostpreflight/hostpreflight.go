@@ -199,6 +199,9 @@ func Collect() Snapshot {
 		{"/proc/net/ipv6_route", "ipv6"},
 	} {
 		lines, err := readBoundedLines(file.path, 256<<10)
+		if shouldIgnoreMissingIPv6Routes(file.family, s.IPv6Unavailable, err) {
+			continue
+		}
 		if err != nil {
 			s.InventoryError = append(s.InventoryError, "routes "+file.family+": "+err.Error())
 			continue
@@ -252,6 +255,12 @@ func Collect() Snapshot {
 		return a.Family < b.Family
 	})
 	return s
+}
+
+// Missing IPv6 route procfs is expected only when the IPv6 sysctl tree is
+// absent too. Other errors, including permission failures, remain hazards.
+func shouldIgnoreMissingIPv6Routes(family string, ipv6Unavailable bool, err error) bool {
+	return family == "ipv6" && ipv6Unavailable && os.IsNotExist(err)
 }
 
 func readBoundedLines(path string, limit int64) ([]string, error) {
