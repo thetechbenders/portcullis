@@ -121,7 +121,6 @@ func TestBoundedProcReader(t *testing.T) {
 	}
 }
 
-
 func TestCollectorSmokeOnLinux(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Linux-only procfs/sysfs inventory")

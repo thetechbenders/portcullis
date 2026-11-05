@@ -82,7 +82,6 @@ func ParsePlan(data []byte) (Selection, error) {
 	return sel, nil
 }
 
-
 // rejectDuplicateJSONKeys traverses the bounded manifest using JSON tokens,
 // including nested objects. encoding/json otherwise silently keeps the last
 // value of a repeated key, which makes operator plans ambiguous.
