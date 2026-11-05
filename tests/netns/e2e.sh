@@ -32,7 +32,7 @@ cleanup() {
   fi
   # The host-loopback relays are host-namespace Python processes. Kill
   # them explicitly before deleting guest namespaces.
-  for name in proxy-portal proxy-demo; do
+  for name in proxy-portal proxy-demo dashboard; do
     [[ ! -f "$state/$name.pid" ]] || kill "$(cat "$state/$name.pid")" 2>/dev/null || true
   done
   for ns in "$ns_a" "$ns_b" "$ns_ap" "$ns_wan" "$ns_lan" "$ns_gw"; do
@@ -225,6 +225,46 @@ PY
 curl --noproxy '*' --silent --show-error --fail-with-body --max-time 8 \
   "http://127.0.0.1:9081/" | grep -q "You're through." \
   || die 'authorized browser destination failed despite kernel grant'
+
+# Operator dashboard: loopback HTTP, token gate, actual kernel snapshot and
+# browser-authorized revoke. This exercises the dashboard backend, not merely
+# the operator CLI.
+start_bg dashboard "$state/bin/portcullisctl" -config "$state/portcullis.json" serve \
+  -listen 127.0.0.1:8788 -token-file "$state/operator.token"
+wait_file "$state/operator.token"
+dash_ready=0
+for _ in {1..100}; do
+  code=$(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' \
+    --max-time 1 "http://127.0.0.1:8788/api/snapshot" || true)
+  if [[ $code == 401 ]]; then dash_ready=1; break; fi
+  sleep .1
+done
+(( dash_ready == 1 )) || die 'operator dashboard not serving'
+token=$(cat "$state/operator.token")
+curl --noproxy '*' --silent --show-error --fail-with-body --max-time 8 \
+  -H "Authorization: Bearer $token" "http://127.0.0.1:8788/api/snapshot" > "$state/dashboard-snapshot.json"
+python3 - "$state/dashboard-snapshot.json" <<'PY'
+import json,sys
+x=json.load(open(sys.argv[1]))
+assert x["ok"] and x["snapshot"]["enforcement"]=="ok",x
+assert len(x["snapshot"]["grants"])==1 and x["snapshot"]["grants"][0]["kernel_present"],x
+PY
+curl --noproxy '*' --silent --show-error --fail-with-body --max-time 8 \
+  -H "Authorization: Bearer $token" \
+  -H 'Origin: http://127.0.0.1:8788' \
+  -H 'X-Portcullis-Request: 1' -H 'Content-Type: application/json' \
+  -d "{\\"mac\\":\\"$mac_a\\"}" \
+  "http://127.0.0.1:8788/api/revoke" > "$state/dashboard-revoke.json"
+python3 - "$state/dashboard-revoke.json" <<'PY'
+import json,sys
+x=json.load(open(sys.argv[1]))
+assert x["ok"],x
+PY
+before=$(count guest-egress)
+code=$(curl --noproxy '*' --silent --show-error --max-time 8 \
+  --output "$state/dashboard-revoked.html" --write-out '%{http_code}' "http://127.0.0.1:9081/")
+[[ $code == 504 ]] || die 'dashboard revoke left destination reachable'
+(( $(count guest-egress) > before )) || die 'dashboard revoke missing kernel drop'
 ctl reset > /dev/null
 [[ $(session_state "$ns_a") == denied ]] || die 'browser grant not removed'
 echo 'PASS: browser relay Host/Origin, real kernel grant, destination and error attribution'
