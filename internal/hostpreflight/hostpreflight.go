@@ -71,6 +71,10 @@ type Selection struct {
 	Management       string `json:"management,omitempty"`
 	PinnedGuestMAC   string `json:"pinned_guest_mac,omitempty"`
 	PinnedGuestSysfs string `json:"pinned_guest_sysfs,omitempty"`
+	PinnedUplinkMAC string `json:"pinned_uplink_mac,omitempty"`
+	PinnedUplinkSysfs string `json:"pinned_uplink_sysfs,omitempty"`
+	PinnedManagementMAC string `json:"pinned_management_mac,omitempty"`
+	PinnedManagementSysfs string `json:"pinned_management_sysfs,omitempty"`
 }
 
 type Finding struct {
@@ -150,6 +154,13 @@ func Collect() Snapshot {
 			}
 			if b, err := os.ReadFile(filepath.Join(base, "operstate")); err == nil {
 				item.OperState = strings.TrimSpace(string(b))
+			}
+			if b, err := os.ReadFile(filepath.Join(base, "ifindex")); err == nil {
+				if sysidx, err := strconv.Atoi(strings.TrimSpace(string(b))); err != nil || sysidx != ni.Index {
+					s.InventoryError = append(s.InventoryError, "interface identity changed during collection: "+ni.Name)
+				}
+			} else {
+				s.InventoryError = append(s.InventoryError, "interface ifindex unavailable: "+ni.Name)
 			}
 			if addrs, err := ni.Addrs(); err != nil {
 				s.InventoryError = append(s.InventoryError, fmt.Sprintf("addresses for %q: %v", ni.Name, err))
@@ -307,6 +318,24 @@ func Evaluate(s Snapshot, sel Selection) Report {
 				add("guest_path_unpinned", "guest sysfs identity is missing or not pinned")
 			} else if guest.SysfsPath != sel.PinnedGuestSysfs {
 				add("guest_path_mismatch", "guest sysfs identity differs from operator-pinned path")
+			}
+		}
+	}
+	for _, role := range []struct {
+		name, label, pinMAC, pinPath string
+	}{
+		{sel.Uplink, "uplink", sel.PinnedUplinkMAC, sel.PinnedUplinkSysfs},
+		{sel.Management, "management", sel.PinnedManagementMAC, sel.PinnedManagementSysfs},
+	} {
+		if nic, ok := byName[role.name]; ok {
+			if nic.MAC == "" || role.pinMAC == "" || !strings.EqualFold(nic.MAC, role.pinMAC) {
+				add(role.label+"_mac_mismatch", "physical "+role.label+" current MAC is missing or differs from its pin")
+			}
+			if nic.SysfsPath == "" || role.pinPath == "" || nic.SysfsPath != role.pinPath {
+				add(role.label+"_path_mismatch", "physical "+role.label+" parent device identity differs from its pin")
+			}
+			if strings.HasPrefix(nic.SysfsPath, "/sys/devices/virtual/") {
+				add(role.label+"_virtual_interface", role.label+" role uses a virtual rather than pinned physical interface")
 			}
 		}
 	}
