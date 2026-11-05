@@ -204,3 +204,28 @@ func TestRedactedReportKeepsPseudonymousBootCorrelation(t *testing.T) {
 		t.Fatalf("bad boot correlation: %q", a.BootID)
 	}
 }
+
+func TestMissingIPv6RouteProcfsOnlyAllowedWhenIPv6Unavailable(t *testing.T) {
+ missing := os.ErrNotExist
+ denied := os.ErrPermission
+ cases := []struct {
+  name, family string
+  unavailable bool
+  err error
+  want bool
+ }{
+  {"disabled IPv6 and missing route", "ipv6", true, missing, true},
+  {"enabled IPv6 and missing route", "ipv6", false, missing, false},
+  {"disabled IPv6 but permission denied", "ipv6", true, denied, false},
+  {"IPv4 missing route", "ipv4", true, missing, false},
+  {"disabled IPv6 but malformed route", "ipv6", true, os.ErrInvalid, false},
+  {"disabled IPv6 and no error", "ipv6", true, nil, false},
+ }
+ for _, tc := range cases {
+  t.Run(tc.name,func(t *testing.T) {
+   if got := shouldIgnoreMissingIPv6Routes(tc.family,tc.unavailable,tc.err); got != tc.want {
+    t.Fatalf("ignore=%v want=%v",got,tc.want)
+   }
+  })
+ }
+}
