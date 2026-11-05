@@ -52,21 +52,21 @@ type Route struct {
 }
 
 type Snapshot struct {
-	BootID			string		`json:"boot_id,omitempty"`
-	ObservedAt		string		`json:"observed_at"`
-	IPv4Forwarding		*bool		`json:"ipv4_forwarding,omitempty"`
-	IPv4DefaultForwarding	*bool		`json:"ipv4_default_forwarding,omitempty"`
-	IPv6DefaultForwarding	*bool		`json:"ipv6_default_forwarding,omitempty"`
-	IPv6Forwarding		*bool		`json:"ipv6_forwarding,omitempty"`
-	IPv6Unavailable		bool		`json:"ipv6_unavailable,omitempty"`
-	Routes			[]Route		`json:"routes"`
-	Hostname		string		`json:"hostname,omitempty"`
-	OS			string		`json:"os"`
-	Arch			string		`json:"arch"`
-	Kernel			string		`json:"kernel,omitempty"`
-	Interfaces		[]Interface	`json:"interfaces"`
-	DefaultRoutes		[]Route		`json:"default_routes"`
-	InventoryError		[]string	`json:"inventory_errors"`
+	BootID                 string      `json:"boot_id,omitempty"`
+	ObservedAt             string      `json:"observed_at"`
+	IPv4Forwarding         *bool       `json:"ipv4_forwarding,omitempty"`
+	IPv4DefaultForwarding  *bool       `json:"ipv4_default_forwarding,omitempty"`
+	IPv6DefaultForwarding  *bool       `json:"ipv6_default_forwarding,omitempty"`
+	IPv6Forwarding         *bool       `json:"ipv6_forwarding,omitempty"`
+	IPv6Unavailable        bool        `json:"ipv6_unavailable,omitempty"`
+	Routes                 []Route     `json:"routes"`
+	Hostname               string      `json:"hostname,omitempty"`
+	OS                     string      `json:"os"`
+	Arch                   string      `json:"arch"`
+	Kernel                 string      `json:"kernel,omitempty"`
+	Interfaces             []Interface `json:"interfaces"`
+	DefaultRoutes          []Route     `json:"default_routes"`
+	InventoryError         []string    `json:"inventory_errors"`
 }
 
 // Selection is an *expected* topology supplied by an operator. No device is
