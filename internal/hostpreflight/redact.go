@@ -4,56 +4,94 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
-var macInterfaceName = regexp.MustCompile("(?i)^enx[0-9a-f]{12}$")
+var macInterfaceName = regexp.MustCompile(`(?i)^(?:en|wl|ww)x[0-9a-f]{12}package hostpreflight
 
-func redactInterfaceName(name string) string {
-	if macInterfaceName.MatchString(name) {
-		sum := sha256.Sum256([]byte(name))
-		return fmt.Sprintf("enx-redacted-%x", sum[:4])
+import (
+	"crypto/sha256"
+	"fmt"
+	"regexp"
+	"strings"
+)
+
+)
+
+// A report-local mapping preserves joins without making hardware identifiers reversible.
+type interfaceRedactor struct {
+	names map[string]string
+}
+
+func (r *interfaceRedactor) name(name string) string {
+	if !macInterfaceName.MatchString(name) {
+		return name
 	}
-	return name
+	if r.names == nil {
+		r.names = make(map[string]string)
+	}
+	key := strings.ToLower(name)
+	if alias, ok := r.names[key]; ok {
+		return alias
+	}
+	alias := fmt.Sprintf("mac-interface-%d", len(r.names)+1)
+	r.names[key] = alias
+	return alias
+}
+
+func (r *interfaceRedactor) diagnostic(detail string) string {
+	// Diagnostic errors may include paths containing MAC-derived interface names.
+	// Suppress the detail entirely: arbitrary paths can reveal more than MACs.
+	if detail == "" {
+		return ""
+	}
+	return "Inventory observation failed; inspect private local diagnostics"
 }
 
 // RedactSnapshot produces a copy for sharing. The unredacted observation is
 // always used for evaluation, so redaction cannot cause missing hazards.
 func RedactSnapshot(s Snapshot) Snapshot {
+	redactor := &interfaceRedactor{}
 	s.Hostname = ""
 	s.BootID = ""
 	s.Interfaces = append([]Interface(nil), s.Interfaces...)
 	for i := range s.Interfaces {
-		s.Interfaces[i].Name = redactInterfaceName(s.Interfaces[i].Name)
-		s.Interfaces[i].Master = redactInterfaceName(s.Interfaces[i].Master)
+		s.Interfaces[i].Name = redactor.name(s.Interfaces[i].Name)
+		s.Interfaces[i].Master = redactor.name(s.Interfaces[i].Master)
 		for j := range s.Interfaces[i].Uppers {
-			s.Interfaces[i].Uppers[j] = redactInterfaceName(s.Interfaces[i].Uppers[j])
+			s.Interfaces[i].Uppers[j] = redactor.name(s.Interfaces[i].Uppers[j])
 		}
 		s.Interfaces[i].MAC = ""
 		s.Interfaces[i].SysfsPath = ""
 		s.Interfaces[i].Addresses = nil
 	}
+	s.InventoryError = append([]string(nil), s.InventoryError...)
+	for i := range s.InventoryError {
+		s.InventoryError[i] = redactor.diagnostic(s.InventoryError[i])
+	}
 	s.Routes = append([]Route(nil), s.Routes...)
 	for i := range s.Routes {
 		s.Routes[i].Destination = ""
-		s.Routes[i].Interface = redactInterfaceName(s.Routes[i].Interface)
+		s.Routes[i].Interface = redactor.name(s.Routes[i].Interface)
 	}
 	s.DefaultRoutes = append([]Route(nil), s.DefaultRoutes...)
 	for i := range s.DefaultRoutes {
 		s.DefaultRoutes[i].Destination = ""
-		s.DefaultRoutes[i].Interface = redactInterfaceName(s.DefaultRoutes[i].Interface)
+		s.DefaultRoutes[i].Interface = redactor.name(s.DefaultRoutes[i].Interface)
 	}
 	return s
 }
 
 func RedactReport(r Report) Report {
+	redactor := &interfaceRedactor{}
 	if r.BootID != "" {
 		// Stable within a boot for comparing reports; deliberately pseudonymous.
 		digest := sha256.Sum256([]byte(r.BootID))
 		r.BootID = fmt.Sprintf("sha256:%x", digest[:12])
 	}
-	r.Selection.Guest = redactInterfaceName(r.Selection.Guest)
-	r.Selection.Uplink = redactInterfaceName(r.Selection.Uplink)
-	r.Selection.Management = redactInterfaceName(r.Selection.Management)
+	r.Selection.Guest = redactor.name(r.Selection.Guest)
+	r.Selection.Uplink = redactor.name(r.Selection.Uplink)
+	r.Selection.Management = redactor.name(r.Selection.Management)
 	r.Selection.PinnedGuestMAC, r.Selection.PinnedGuestSysfs = "", ""
 	r.Selection.PinnedUplinkMAC, r.Selection.PinnedUplinkSysfs = "", ""
 	r.Selection.PinnedManagementMAC, r.Selection.PinnedManagementSysfs = "", ""
