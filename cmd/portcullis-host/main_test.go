@@ -128,8 +128,8 @@ func TestInventoryRedactsMACNamesInErrorsAndRoutes(t *testing.T) {
 		snap.InventoryError = append(snap.InventoryError, "cannot read /proc/sys/net/ipv4/conf/"+name+"/forwarding")
 	}
 	var out, diag bytes.Buffer
-	if code := run([]string{"inventory"}, &out, &diag, func() hostpreflight.Snapshot { return snap }); code != 0 {
-		t.Fatalf("inventory failed: %d %s", code, diag.String())
+	if code := run([]string{"inventory"}, &out, &diag, func() hostpreflight.Snapshot { return snap }); code != 1 {
+		t.Fatalf("inventory with read errors must return 1, got: %d %s", code, diag.String())
 	}
 	for _, secret := range []string{"001122aabbcc", "00e04c6a1b2c", "112233445566", "enx-redacted-", "/proc/sys/net/ipv4/conf/"} {
 		if strings.Contains(out.String(), secret) {
