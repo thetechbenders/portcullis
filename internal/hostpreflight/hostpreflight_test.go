@@ -41,7 +41,7 @@ func codes(r Report) []string {
 func TestBaselineHasNoObservedHazardsButDoesNotAssessSafety(t *testing.T) {
 	s, sel := fixture()
 	r := Evaluate(s, sel)
-	if len(r.Hazards) != 0 || len(r.NotAssessed) != 5 || r.SchemaVersion != SchemaVersion {
+	if len(r.Hazards) != 0 || len(r.NotAssessed) != 6 || r.SchemaVersion != SchemaVersion {
 		t.Fatalf("clean observable fixture must retain unresolved safety gates: %+v", r)
 	}
 	if r.PlanSHA256 == "" {
@@ -183,4 +183,20 @@ func TestPilotLinkLocalAndManagementDefaultAreNotHazards(t *testing.T) {
 	if got := codes(Evaluate(s, sel)); len(got) != 0 {
 		t.Fatalf("isolated-uplink pilot should have no observed hazards, got %v", got)
 	}
+}
+
+func TestGloballyUnavailableIPv6IsNotAFalseAlarm(t *testing.T) {
+ s, sel := fixture()
+ s.IPv6Unavailable = true
+ s.IPv6Forwarding = nil
+ s.Interfaces[1].IPv6Disabled = nil
+ s.Interfaces[1].AcceptRA = nil
+ if got := codes(Evaluate(s,sel)); len(got) != 0 { t.Fatalf("disabled IPv6 should not cause hazards: %v",got) }
+}
+func TestRedactedReportKeepsPseudonymousBootCorrelation(t *testing.T) {
+ s, sel := fixture()
+ s.BootID = "private-boot-id"
+ a := RedactReport(Evaluate(s,sel))
+ b := RedactReport(Evaluate(s,sel))
+ if a.BootID == "" || a.BootID != b.BootID || a.BootID == s.BootID { t.Fatalf("bad boot correlation: %q",a.BootID) }
 }
