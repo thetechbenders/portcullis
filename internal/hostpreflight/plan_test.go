@@ -2,6 +2,8 @@ package hostpreflight
 
 import (
 	"strings"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -27,8 +29,8 @@ func TestParsePlanAcceptsPinnedIdentities(t *testing.T) {
 		t.Fatalf("unexpected selection: %+v", sel)
 	}
 	s, _ := fixture()
-	if Evaluate(s, sel).DeploymentAuthorized {
-		t.Fatal("valid plan must not imply authorization")
+	if len(Evaluate(s, sel).Hazards) != 0 {
+		t.Fatal("valid fixture must have no observed hazards, without implying deployment authority")
 	}
 }
 
@@ -44,6 +46,9 @@ func TestParsePlanRejectsAmbiguityAndBadPins(t *testing.T) {
 		{"wrong version", strings.Replace(validHostPlan, "\"schema_version\":1", "\"schema_version\":2", 1)},
 		{"duplicate top-level key", strings.Replace(validHostPlan, "\"schema_version\":1,", "\"schema_version\":1,\"schema_version\":1,", 1)},
 		{"duplicate nested key", strings.Replace(validHostPlan, "\"guest\":\"usb0\",", "\"guest\":\"usb0\",\"guest\":\"usb0\",", 1)},
+		{"case-variant duplicate", strings.Replace(validHostPlan, "\"guest\":\"usb0\",", "\"guest\":\"usb0\",\"GUEST\":\"eth7\",", 1)},
+		{"capitalized field", strings.Replace(validHostPlan, "\"selection\":{", "\"Selection\":{", 1)},
+		{"virtual guest sysfs", strings.Replace(validHostPlan, "/sys/devices/pci0000/usb0", "/sys/devices/virtual/net/veth0", 1)},
 		{"missing selection", "{\"schema_version\":1}"},
 		{"role collision", strings.Replace(validHostPlan, "\"uplink\":\"eth0\"", "\"uplink\":\"usb0\"", 1)},
 		{"bad interface name", strings.Replace(validHostPlan, "\"guest\":\"usb0\"", "\"guest\":\"../usb0\"", 1)},
@@ -59,4 +64,21 @@ func TestParsePlanRejectsAmbiguityAndBadPins(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPlanCanonicalMACAndSafeFileType(t *testing.T) {
+	plan := strings.Replace(validHostPlan, "02:22:33:44:55:66", "02-22-33-44-55-66", 1)
+	sel, err := ParsePlan([]byte(plan))
+	if err != nil || sel.PinnedGuestMAC != "02:22:33:44:55:66" {
+		t.Fatalf("MAC not normalized: %+v %v", sel, err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plan.json")
+	if err := os.WriteFile(path, []byte(validHostPlan), 0o600); err != nil { t.Fatal(err) }
+	if _, err := LoadPlan(path); err != nil { t.Fatal(err) }
+	link := filepath.Join(dir, "plan-link.json")
+	if err := os.Symlink(path, link); err != nil { t.Fatal(err) }
+	if _, err := LoadPlan(link); err == nil { t.Fatal("symlink plans must be rejected") }
+	if err := os.Chmod(path, 0o666); err != nil { t.Fatal(err) }
+	if _, err := LoadPlan(path); err == nil { t.Fatal("world-writable plans must be rejected") }
 }
