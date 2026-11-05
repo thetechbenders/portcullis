@@ -31,19 +31,23 @@ func VerifyDenyGuardJSON(data []byte, guest string) error {
 	if len(data) == 0 || len(data) > 1<<20 {
 		return fmt.Errorf("%w: missing or oversized ruleset", ErrGuardAttestation)
 	}
-	var document struct {
-		Nftables []json.RawMessage `json:"nftables"`
+	if err := rejectDuplicateGuardJSON(data); err != nil {
+		return fmt.Errorf("%w: invalid or ambiguous JSON: %v", ErrGuardAttestation, err)
 	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	if err := dec.Decode(&document); err != nil {
+	// Go's struct decoder accepts case-insensitive and Unicode-folded field
+	// names. An exact-key map is required so alternate top-level spellings
+	// cannot replace a legitimate nftables listing.
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(data, &document); err != nil {
 		return fmt.Errorf("%w: decode: %v", ErrGuardAttestation, err)
 	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		return fmt.Errorf("%w: trailing content", ErrGuardAttestation)
+	rawListing, ok := document["nftables"]
+	if len(document) != 1 || !ok {
+		return fmt.Errorf("%w: expected exactly one literal nftables key", ErrGuardAttestation)
 	}
-	if len(document.Nftables) == 0 {
-		return fmt.Errorf("%w: empty nftables listing", ErrGuardAttestation)
+	var listing []json.RawMessage
+	if err := json.Unmarshal(rawListing, &listing); err != nil || len(listing) == 0 {
+		return fmt.Errorf("%w: missing or malformed nftables listing", ErrGuardAttestation)
 	}
 	seenTable := false
 	chains := map[string]bool{}
@@ -57,12 +61,15 @@ func VerifyDenyGuardJSON(data []byte, guest string) error {
 		"guest-egress":  {"guest_forward", guest, "iifname"},
 		"guest-ingress": {"guest_forward", guest, "oifname"},
 	}
-	for _, raw := range document.Nftables {
+	for _, raw := range listing {
 		var entry map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &entry); err != nil || len(entry) != 1 {
 			return fmt.Errorf("%w: invalid listing element", ErrGuardAttestation)
 		}
 		for kind, payload := range entry {
+			if err := verifyDenyObjectFields(kind, payload); err != nil {
+				return err
+			}
 			if kind == "metainfo" {
 				continue
 			}
@@ -129,13 +136,13 @@ func VerifyDenyGuardJSON(data []byte, guest string) error {
 				if !ok || len(o.Expr[1]) != 1 || len(counter) != 2 {
 					return fmt.Errorf("%w: missing counter %q", ErrGuardAttestation, o.Comment)
 				}
-				if _, ok := counter["packets"].(float64); !ok {
-					return fmt.Errorf("%w: malformed counter %q", ErrGuardAttestation, o.Comment)
+				for _, key := range []string{"packets", "bytes"} {
+					value, ok := counter[key].(float64)
+					if !ok || value < 0 || value > 9007199254740991 || value != float64(uint64(value)) {
+						return fmt.Errorf("%w: malformed %s counter %q", ErrGuardAttestation, key, o.Comment)
+					}
 				}
-				if _, ok := counter["bytes"].(float64); !ok {
-					return fmt.Errorf("%w: malformed byte counter %q", ErrGuardAttestation, o.Comment)
-				}
-				if _, ok := o.Expr[2]["drop"]; !ok || len(o.Expr[2]) != 1 {
+				if value, ok := o.Expr[2]["drop"]; !ok || value != nil || len(o.Expr[2]) != 1 {
 					return fmt.Errorf("%w: missing drop verdict %q", ErrGuardAttestation, o.Comment)
 				}
 				rules[o.Comment] = true
@@ -146,6 +153,113 @@ func VerifyDenyGuardJSON(data []byte, guest string) error {
 	}
 	if !seenTable || len(chains) != 2 || !chains["guest_input"] || !chains["guest_forward"] || len(rules) != len(expected) {
 		return fmt.Errorf("%w: missing required chain or rule", ErrGuardAttestation)
+	}
+	return nil
+}
+
+// rejectDuplicateGuardJSON rejects ambiguous keys at every nesting level,
+// including inside match expressions that would otherwise decode last-wins.
+// A depth bound protects the verifier from attacker-controlled nested input.
+func rejectDuplicateGuardJSON(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	var walk func(int) error
+	walk = func(depth int) error {
+		if depth > 64 {
+			return errors.New("JSON nesting exceeds limit")
+		}
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		switch tok {
+		case json.Delim('{'):
+			seen := map[string]bool{}
+			for dec.More() {
+				t, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				key, ok := t.(string)
+				if !ok || seen[key] {
+					return fmt.Errorf("duplicate or malformed JSON object key %q", key)
+				}
+				seen[key] = true
+				if err := walk(depth + 1); err != nil {
+					return err
+				}
+			}
+			_, err = dec.Token()
+			return err
+		case json.Delim('['):
+			for dec.More() {
+				if err := walk(depth + 1); err != nil {
+					return err
+				}
+			}
+			_, err = dec.Token()
+			return err
+		default:
+			return nil
+		}
+	}
+	if err := walk(0); err != nil {
+		return err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return errors.New("unexpected trailing JSON")
+	}
+	return nil
+}
+
+// verifyDenyObjectFields rejects unrecognized or wrongly typed payload
+// attributes instead of silently ignoring a second, potentially permissive
+// interpretation of kernel state. Handles are informational only.
+func verifyDenyObjectFields(kind string, payload json.RawMessage) error {
+	fields := map[string]json.RawMessage{}
+	if len(payload) == 0 || payload[0] != '{' || json.Unmarshal(payload, &fields) != nil {
+		return fmt.Errorf("%w: malformed %s object", ErrGuardAttestation, kind)
+	}
+	var allowed, required []string
+	switch kind {
+	case "metainfo":
+		allowed = []string{"version", "release_name", "json_schema_version"}
+	case "table":
+		allowed = []string{"family", "name", "flags", "handle"}
+		required = []string{"family", "name"}
+	case "chain":
+		allowed = []string{"family", "table", "name", "type", "hook", "prio", "policy", "handle"}
+		required = []string{"family", "table", "name", "type", "hook", "prio", "policy"}
+	case "rule":
+		allowed = []string{"family", "table", "chain", "comment", "expr", "handle"}
+		required = []string{"family", "table", "chain", "comment", "expr"}
+	default:
+		return fmt.Errorf("%w: unexpected object %q", ErrGuardAttestation, kind)
+	}
+	permitted := make(map[string]bool, len(allowed))
+	for _, k := range allowed {
+		permitted[k] = true
+	}
+	for k, v := range fields {
+		if !permitted[k] || string(v) == "null" {
+			return fmt.Errorf("%w: unexpected or null %s field %q", ErrGuardAttestation, kind, k)
+		}
+	}
+	for _, k := range required {
+		if _, ok := fields[k]; !ok {
+			return fmt.Errorf("%w: missing %s field %q", ErrGuardAttestation, kind, k)
+		}
+	}
+	if raw, ok := fields["handle"]; ok {
+		var handle uint64
+		if json.Unmarshal(raw, &handle) != nil {
+			return fmt.Errorf("%w: invalid handle on %s", ErrGuardAttestation, kind)
+		}
+	}
+	if raw, ok := fields["flags"]; ok {
+		var flags []string
+		if len(raw) == 0 || raw[0] != '[' || json.Unmarshal(raw, &flags) != nil {
+			return fmt.Errorf("%w: invalid table flags", ErrGuardAttestation)
+		}
 	}
 	return nil
 }

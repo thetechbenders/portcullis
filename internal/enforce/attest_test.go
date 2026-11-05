@@ -3,6 +3,7 @@ package enforce
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -95,5 +96,73 @@ func TestVerifyDenyGuardRejectsMalformed(t *testing.T) {
 		if err := VerifyDenyGuardJSON([]byte(input), "guest0"); !errors.Is(err, ErrGuardAttestation) {
 			t.Fatalf("accepted %q: %v", input, err)
 		}
+	}
+}
+
+// The top-level JSON contract is case-sensitive. Go struct field matching
+// is not: case and Unicode-folded variants must never select a valid listing.
+func TestDenyAttestationTopLevelNamesAreLiteral(t *testing.T) {
+	good, err := json.Marshal(fixtureListing())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(good)
+	if !strings.HasPrefix(s, `{"nftables":`) {
+		t.Fatalf("unexpected fixture encoding: %q", s)
+	}
+	listing := strings.TrimPrefix(s, `{"nftables":`)
+	listing = strings.TrimSuffix(listing, "}")
+	cases := map[string]string{
+		"uppercase only":                 `{"NFTABLES":` + listing + "}",
+		"mixed case only":                `{"Nftables":` + listing + "}",
+		"unicode folded only":            `{"nftableſ":` + listing + "}",
+		"unicode escaped only":           `{"nftable\\u017f":` + listing + "}",
+		"uppercase duplicate safe last":  `{"nftables":[],"NFTABLES":` + listing + "}",
+		"uppercase duplicate safe first": `{"NFTABLES":[], "nftables":` + listing + "}",
+		"unicode duplicate safe last":    `{"nftables":[],"nftableſ":` + listing + "}",
+		"unicode escaped duplicate":      `{"nftables":[],"nftable\\u017f":` + listing + "}",
+	}
+	for name, input := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := VerifyDenyGuardJSON([]byte(input), "guest0"); !errors.Is(err, ErrGuardAttestation) {
+				t.Fatalf("accepted ambiguous top-level nftables field: %s", input[:min(len(input), 95)])
+			}
+		})
+	}
+}
+
+func TestDenyAttestationRejectsAmbiguousAndMalformedFields(t *testing.T) {
+	good, err := json.Marshal(fixtureListing())
+	if err != nil {
+		t.Fatal(err)
+	}
+	replace := func(old, new string) string {
+		t.Helper()
+		s := string(good)
+		if !strings.Contains(s, old) {
+			t.Fatalf("fixture missing %q", old)
+		}
+		return strings.Replace(s, old, new, 1)
+	}
+	cases := map[string]string{
+		"duplicate root":         replace(`"nftables":`, `"nftables":[],"nftables":`),
+		"duplicate object kind":  replace(`"table":{`, `"table":{},"table":{`),
+		"duplicate rule comment": replace(`"comment":"guest-egress"`, `"comment":"bogus","comment":"guest-egress"`),
+		"duplicate nested match": replace(`"op":"=="`, `"op":"!=","op":"=="`),
+		"top-level extra":        strings.TrimSuffix(string(good), "}") + `,"other":42}`,
+		"empty metainfo":         replace(`"metainfo":{"version":"1.0.9"}`, `"metainfo":null`),
+		"null table flags":       replace(`"name":"portcullis_guard"}`, `"name":"portcullis_guard","flags":null}`),
+		"unknown table field":    replace(`"name":"portcullis_guard"}`, `"name":"portcullis_guard","flags_extra":["dormant"]}`),
+		"missing chain family":   replace(`"chain":{"family":"inet",`, `"chain":{`),
+		"counter fractional":     replace(`"packets":0`, `"packets":0.5`),
+		"counter negative":       replace(`"bytes":0`, `"bytes":-1`),
+		"verdict payload":        replace(`"drop":null`, `"drop":{"unexpected":true}`),
+	}
+	for name, input := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := VerifyDenyGuardJSON([]byte(input), "guest0"); !errors.Is(err, ErrGuardAttestation) {
+				t.Fatalf("malformed deny guard accepted: %v", err)
+			}
+		})
 	}
 }
