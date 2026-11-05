@@ -173,6 +173,22 @@ api "$ns_a" / > /dev/null
 
 # Disposable host-browser relay acceptance with the actual Host/Origin.
 # Port 80 preserves the portal's authority checks, not a rewritten header.
+# Unlike the packet-only scenarios, this browser relay needs an actual HTTP
+# destination to prove positive delivery after a kernel grant.
+install -d -m 755 "$state/www"
+printf "%s\n" "<!doctype html><title>Portcullis destination</title><h1>You're through.</h1>" > "$state/www/index.html"
+start_bg browser-www ip netns exec "$ns_wan" python3 -m http.server \
+  --bind 198.18.0.2 --directory "$state/www" 8080
+browser_www_ready=0
+for _ in {1..100}; do
+  if ip netns exec "$ns_wan" curl --noproxy '*' --silent --fail --max-time 1 \
+    http://198.18.0.2:8080/ > /dev/null; then
+    browser_www_ready=1
+    break
+  fi
+  sleep .1
+done
+(( browser_www_ready == 1 )) || die 'browser destination server never became ready'
 start_bg proxy-portal python3 "$root/demo/nsproxy.py" --netns "$ns_a" --listen-port 80 \
   --target-host 10.203.0.1 --target-port 80 --ready "$state/proxy-portal.ready"
 start_bg proxy-demo python3 "$root/demo/nsproxy.py" --netns "$ns_a" --listen-port 9081 \
