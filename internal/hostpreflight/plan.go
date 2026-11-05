@@ -1,0 +1,80 @@
+package hostpreflight
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+const maxPlanBytes = 8192
+
+var interfaceName = regexp.MustCompile("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,14}$")
+
+// Plan is a versioned, operator-authored set of expected identities. Parsing
+// plans never installs networking configuration or grants authorization.
+type Plan struct {
+	SchemaVersion int       `json:"schema_version"`
+	Selection     Selection `json:"selection"`
+}
+
+// LoadPlan reads a small local manifest without following it with any side
+// effect. The caller is responsible for keeping manifests private.
+func LoadPlan(path string) (Selection, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Selection{}, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxPlanBytes+1))
+	if err != nil {
+		return Selection{}, err
+	}
+	return ParsePlan(data)
+}
+
+// ParsePlan rejects unknown keys, trailing data, missing pins and nonphysical
+// interface identities. Even a valid plan cannot authorize deployment.
+func ParsePlan(data []byte) (Selection, error) {
+	if len(data) == 0 || len(data) > maxPlanBytes {
+		return Selection{}, errors.New("host plan is missing or exceeds 8192 bytes")
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var p Plan
+	if err := dec.Decode(&p); err != nil {
+		return Selection{}, fmt.Errorf("invalid host plan: %w", err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return Selection{}, errors.New("host plan contains trailing data")
+	}
+	if p.SchemaVersion != SchemaVersion {
+		return Selection{}, fmt.Errorf("unsupported host plan schema %d", p.SchemaVersion)
+	}
+	sel := p.Selection
+	for _, name := range []string{sel.Guest, sel.Uplink, sel.Management} {
+		if !interfaceName.MatchString(name) {
+			return Selection{}, fmt.Errorf("invalid or missing interface name %q", name)
+		}
+	}
+	if sel.Guest == sel.Uplink || sel.Guest == sel.Management || sel.Uplink == sel.Management {
+		return Selection{}, errors.New("host interface roles must differ")
+	}
+	mac, err := net.ParseMAC(sel.PinnedGuestMAC)
+	if err != nil || len(mac) != 6 || mac[0]&1 != 0 {
+		return Selection{}, errors.New("host plan requires a six-byte unicast guest MAC pin")
+	}
+	if !strings.HasPrefix(sel.PinnedGuestSysfs, "/sys/devices/") ||
+		filepath.Clean(sel.PinnedGuestSysfs) != sel.PinnedGuestSysfs ||
+		strings.ContainsAny(sel.PinnedGuestSysfs, "\x00\n\r") {
+		return Selection{}, errors.New("host plan requires a canonical sysfs device path under /sys/devices")
+	}
+	return sel, nil
+}
