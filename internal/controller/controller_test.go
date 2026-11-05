@@ -327,6 +327,61 @@ func TestHoldFailedStartRejectsUnfailedController(t *testing.T) {
 	}
 }
 
+// adoptionRaceBindings triggers an Unbind safety transition precisely while
+// Start has released the controller mutex to adopt inherited DHCP bindings.
+type adoptionRaceBindings struct {
+	*fakeDHCP
+	onAdopt func(model.Binding)
+}
+
+func (b *adoptionRaceBindings) Adopt(binding model.Binding) error {
+	if b.onAdopt != nil {
+		b.onAdopt(binding)
+	}
+	return b.fakeDHCP.Adopt(binding)
+}
+
+func TestStartAdoptionSafetyRaceNeverReturnsSuccess(t *testing.T) {
+	e := newEnv(t)
+	e.k.injectBound(addrA, macA, 10*time.Minute)
+	e.k.setFail("Revoke", errInjected)
+	b := &adoptionRaceBindings{fakeDHCP: e.dhcp}
+	b.onAdopt = func(binding model.Binding) {
+		e.c.Unbind(context.Background(), binding, "concurrent failed revoke")
+	}
+	e.c.SetBindings(b)
+	if err := e.c.Start(context.Background()); !errors.Is(err, ErrDegraded) {
+		t.Fatalf("Start returned success after degradation during adoption: %v", err)
+	}
+	if d, reason := e.c.Degraded(); !d || reason == "" {
+		t.Fatalf("lost degraded status: degraded=%v reason=%q", d, reason)
+	}
+	if err := e.c.Run(context.Background()); !errors.Is(err, ErrNotStarted) {
+		t.Fatalf("running a failed-start controller: %v", err)
+	}
+	if e.k.count("Grant") != 0 || e.fs.count() == 0 {
+		t.Fatal("failed-start adoption granted authority or skipped isolation")
+	}
+}
+
+func TestStartAdoptionCancellationDoesNotServe(t *testing.T) {
+	e := newEnv(t)
+	e.k.injectBound(addrA, macA, 10*time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
+	b := &adoptionRaceBindings{fakeDHCP: e.dhcp}
+	b.onAdopt = func(model.Binding) { cancel() }
+	e.c.SetBindings(b)
+	if err := e.c.Start(ctx); !errors.Is(err, ErrDegraded) {
+		t.Fatalf("canceled adoption accepted: %v", err)
+	}
+	if err := e.c.Run(context.Background()); !errors.Is(err, ErrNotStarted) {
+		t.Fatalf("canceled controller entered serving state: %v", err)
+	}
+	if d, _ := e.c.Degraded(); !d {
+		t.Fatal("canceled startup did not fail closed")
+	}
+}
+
 func TestStartFailureRefusesEverything(t *testing.T) {
 	e := newEnv(t)
 	e.k.setFail("Attest", errInjected)
