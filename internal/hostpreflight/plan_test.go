@@ -42,6 +42,8 @@ func TestParsePlanRejectsAmbiguityAndBadPins(t *testing.T) {
 		{"trailing object", validHostPlan + "{}"},
 		{"unknown key", strings.Replace(validHostPlan, "\"schema_version\":1,", "\"unexpected\":true,\"schema_version\":1,", 1)},
 		{"wrong version", strings.Replace(validHostPlan, "\"schema_version\":1", "\"schema_version\":2", 1)},
+		{"duplicate top-level key", strings.Replace(validHostPlan, "\"schema_version\":1,", "\"schema_version\":1,\"schema_version\":1,", 1)},
+		{"duplicate nested key", strings.Replace(validHostPlan, "\"guest\":\"usb0\",", "\"guest\":\"usb0\",\"guest\":\"usb0\",", 1)},
 		{"missing selection", "{\"schema_version\":1}"},
 		{"role collision", strings.Replace(validHostPlan, "\"uplink\":\"eth0\"", "\"uplink\":\"usb0\"", 1)},
 		{"bad interface name", strings.Replace(validHostPlan, "\"guest\":\"usb0\"", "\"guest\":\"../usb0\"", 1)},
