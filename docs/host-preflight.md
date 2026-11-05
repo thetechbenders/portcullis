@@ -41,7 +41,11 @@ This example is **fictional**. First inspect your actual host; do not use these 
     "uplink": "eth0",
     "management": "wlan0",
     "pinned_guest_mac": "02:22:33:44:55:66",
-    "pinned_guest_sysfs": "/sys/devices/pci0000/usb0"
+    "pinned_guest_sysfs": "/sys/devices/pci0000/usb0",
+    "pinned_uplink_mac": "dc:a6:32:aa:bb:cc",
+    "pinned_uplink_sysfs": "/sys/devices/platform/soc/eth0",
+    "pinned_management_mac": "dc:a6:32:bb:cc:dd",
+    "pinned_management_sysfs": "/sys/devices/platform/soc/wlan0"
   }
 }
 ```
@@ -54,7 +58,7 @@ Save it as `private-host-plan.json` with private file permissions and run:
 
 The plan parser is bounded at 8 KiB, accepts only documented key spellings, rejects duplicate keys (including differently capitalized variants), unknown fields, trailing content, role collisions, invalid interface names, malformed/unicast-invalid MAC pins, virtual or noncanonical sysfs paths, symlinks, FIFOs and group/world-writable plan files. MACs are canonicalized before comparison.
 
-The tool currently **does not** pin the uplink and management interfaces by physical parent identifiers, does not read the permanent hardware MAC through netlink, and cannot establish physical cabling or attachment provenance. A current MAC whose `addr_assign_type` is not permanent is flagged as a possible identity drift. These are gaps to close before host activation.
+The tool pins the current MAC and sysfs parent path for all three roles, but **does not** read the permanent hardware MAC through netlink, and cannot establish physical cabling or attachment provenance. A current MAC whose `addr_assign_type` is not permanent is flagged as a possible identity drift. These are gaps to close before host activation.
 
 ## Evidence gathered
 
