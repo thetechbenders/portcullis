@@ -760,15 +760,18 @@ func (c *Controller) revokeLocked(addr netip.Addr, mac model.MAC, view *kernelVi
 	return nil
 }
 
-// flushFlowsLocked deletes conntrack state. Failure is recorded but does not
-// degrade: the guard has no blanket established-accept, so conntrack entries
-// cannot forward packets once the grant elements are gone.
-func (c *Controller) flushFlowsLocked(addr netip.Addr) {
+// flushFlowsLocked deletes conntrack state. A failure during revocation is
+// logged but does not restore revoked grants: there is no blanket
+// established-accept. During a NEW grant, however, the caller MUST check
+// this error: old reply-direction flows could otherwise follow a reused IP.
+func (c *Controller) flushFlowsLocked(addr netip.Addr) error {
 	cctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 	defer cancel()
 	if err := c.flows.Flush(cctx, addr); err != nil {
 		c.eventLocked("flow-flush-failed", fmt.Sprintf("address %s", addr))
+		return err
 	}
+	return nil
 }
 
 func (c *Controller) unbindKernelLocked(addr netip.Addr, mac model.MAC, why string) {

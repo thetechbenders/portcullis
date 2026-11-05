@@ -49,6 +49,41 @@ func TestNewValidation(t *testing.T) {
 	}
 }
 
+func TestGrantFlushesPreviousHolderFlowsFirst(t *testing.T) {
+	e := newEnv(t)
+	e.start()
+	e.bind(addrA, macA)
+	flushedBeforeGrant := false
+	e.fl.onFlush = func(addr netip.Addr) {
+		if addr == addrA && e.k.count("Grant") == 0 && len(e.c.grants) == 0 {
+			flushedBeforeGrant = true
+		}
+	}
+	if r := e.guest(ipc.OpRequest, 60, addrA); !r.OK || state(r) != ipc.StateGranted {
+		t.Fatalf("new grant: %+v", r)
+	}
+	if !flushedBeforeGrant || !e.fl.has(addrA) {
+		t.Fatal("new grant was issued before stale conntrack state was flushed")
+	}
+}
+
+func TestGrantRefusesConntrackFlushFailure(t *testing.T) {
+	e := newEnv(t)
+	e.start()
+	e.bind(addrA, macA)
+	e.fl.fail = errors.New("injected conntrack flush failure")
+	if r := e.guest(ipc.OpRequest, 60, addrA); r.OK || r.Error != ipc.ErrUnavailable {
+		t.Fatalf("failed conntrack flush granted access: %+v", r)
+	}
+	if e.k.count("Grant") != 0 || len(e.c.grants) != 0 {
+		t.Fatal("controller granted access after pregrant conntrack flush failure")
+	}
+	e.fl.fail = nil
+	if r := e.guest(ipc.OpRequest, 60, addrA); !r.OK || state(r) != ipc.StateGranted {
+		t.Fatalf("failed to recover after conntrack flush restored: %+v", r)
+	}
+}
+
 func TestGrantLifecycleAndKernelExpiry(t *testing.T) {
 	e := newEnv(t)
 	e.start()

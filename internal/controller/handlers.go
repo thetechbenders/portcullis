@@ -241,6 +241,13 @@ func (c *Controller) requestLocked(ctx context.Context, b model.Binding, ks mode
 			return c.unavailable()
 		}
 	}
+	// granted_dst_v4 matches only the IPv4 destination. Even if a previous
+	// holder's timed grant has ended, conntrack can retain a reply-direction
+	// association for this address. Require a successful flush before ever
+	// issuing authority to the next holder (including after daemon restart).
+	if err := c.flushFlowsLocked(b.Addr); err != nil {
+		return failure(ipc.ErrUnavailable, "previous connection state could not be cleared; access was not granted", &cur)
+	}
 	l, err := c.store.Issue(b.MAC.String(), ttl)
 	if err != nil {
 		return failure(ipc.ErrUnavailable, "the grant could not be recorded", &cur)

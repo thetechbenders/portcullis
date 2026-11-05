@@ -233,13 +233,18 @@ func (k *fakeKernel) hasBound(ip netip.Addr, mac model.MAC) bool {
 type fakeFlows struct {
 	mu      sync.Mutex
 	flushed []netip.Addr
+	fail    error
+	onFlush func(netip.Addr)
 }
 
 func (f *fakeFlows) Flush(_ context.Context, ip netip.Addr) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.flushed = append(f.flushed, ip)
-	return nil
+	if f.onFlush != nil {
+		f.onFlush(ip)
+	}
+	return f.fail
 }
 
 func (f *fakeFlows) has(ip netip.Addr) bool {
