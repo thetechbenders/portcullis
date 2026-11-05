@@ -81,7 +81,8 @@ foreign HTTP authority. The browser must use `http://portal.localhost/` and
 requests carrying the same-origin `Origin: http://portal.localhost`.
 The disposable E2E job exercises those exact HTTP authorities and verifies
 that a guest-bound browser relay can request a real kernel grant and reach the
-uplink destination. The host port 80 must be free for the demo.
+uplink destination. It also tests the loopback dashboard's bearer-token gate,
+kernel-backed snapshot and operator revoke through the real HTTP API. The host port 80 must be free for the demo.
 
 A relay-generated 502/504 is *not* an enforcement verdict. Confirm packet
 denial using kernel counters, controller state, and positive connectivity
