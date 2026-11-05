@@ -12,48 +12,48 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
-	"time"
-	"net/netip"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const SchemaVersion = 1
 
 type Interface struct {
-	Name      string   `json:"name"`
-	Index     int      `json:"index"`
-	MAC       string   `json:"mac,omitempty"`
-	SysfsPath string   `json:"sysfs_path,omitempty"`
-	Driver    string   `json:"driver,omitempty"`
-	Master    string   `json:"master,omitempty"`
-	Uppers    []string `json:"uppers"`
-	Addresses []string `json:"addresses"`
-	Up        bool     `json:"up"`
-	Loopback  bool     `json:"loopback"`
-	OperState string   `json:"oper_state,omitempty"`
-	IPv6Disabled *bool `json:"ipv6_disabled,omitempty"`
-	AcceptRA *int `json:"accept_ra,omitempty"`
-	MACAssignType *int `json:"mac_assign_type,omitempty"`
+	Name          string   `json:"name"`
+	Index         int      `json:"index"`
+	MAC           string   `json:"mac,omitempty"`
+	SysfsPath     string   `json:"sysfs_path,omitempty"`
+	Driver        string   `json:"driver,omitempty"`
+	Master        string   `json:"master,omitempty"`
+	Uppers        []string `json:"uppers"`
+	Addresses     []string `json:"addresses"`
+	Up            bool     `json:"up"`
+	Loopback      bool     `json:"loopback"`
+	OperState     string   `json:"oper_state,omitempty"`
+	IPv6Disabled  *bool    `json:"ipv6_disabled,omitempty"`
+	AcceptRA      *int     `json:"accept_ra,omitempty"`
+	MACAssignType *int     `json:"mac_assign_type,omitempty"`
 }
 
 type Route struct {
-	Family    string `json:"family"`
-	Interface string `json:"interface"`
+	Family      string `json:"family"`
+	Interface   string `json:"interface"`
 	Destination string `json:"destination"`
-	Default bool `json:"default"`
+	Default     bool   `json:"default"`
 }
 
 type Snapshot struct {
-	BootID string `json:"boot_id,omitempty"`
-	ObservedAt string `json:"observed_at"`
-	IPv4Forwarding *bool `json:"ipv4_forwarding,omitempty"`
-	IPv6Forwarding *bool `json:"ipv6_forwarding,omitempty"`
-	Routes []Route `json:"routes"`
+	BootID         string      `json:"boot_id,omitempty"`
+	ObservedAt     string      `json:"observed_at"`
+	IPv4Forwarding *bool       `json:"ipv4_forwarding,omitempty"`
+	IPv6Forwarding *bool       `json:"ipv6_forwarding,omitempty"`
+	Routes         []Route     `json:"routes"`
 	Hostname       string      `json:"hostname,omitempty"`
 	OS             string      `json:"os"`
 	Arch           string      `json:"arch"`
@@ -80,13 +80,13 @@ type Finding struct {
 }
 
 type Report struct {
-	SchemaVersion int `json:"schema_version"`
-	BootID string `json:"boot_id,omitempty"`
-	ObservedAt string `json:"observed_at"`
-	PlanSHA256 string `json:"plan_sha256"`
-	Selection Selection `json:"selection"`
-	Hazards []Finding `json:"hazards"`
-	NotAssessed []string `json:"not_assessed"`
+	SchemaVersion int       `json:"schema_version"`
+	BootID        string    `json:"boot_id,omitempty"`
+	ObservedAt    string    `json:"observed_at"`
+	PlanSHA256    string    `json:"plan_sha256"`
+	Selection     Selection `json:"selection"`
+	Hazards       []Finding `json:"hazards"`
+	NotAssessed   []string  `json:"not_assessed"`
 }
 
 // Collect inspects only kernel-exposed files and the standard library's
@@ -95,7 +95,7 @@ func Collect() Snapshot {
 	s := Snapshot{
 		OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Interfaces: []Interface{}, DefaultRoutes: []Route{}, Routes: []Route{},
-		ObservedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		ObservedAt:     time.Now().UTC().Format(time.RFC3339Nano),
 		InventoryError: []string{},
 	}
 	if b, err := os.ReadFile("/proc/sys/kernel/random/boot_id"); err == nil {
@@ -179,13 +179,17 @@ func Collect() Snapshot {
 		}
 		s.Routes = append(s.Routes, routes...)
 		for _, route := range routes {
-			if route.Default { s.DefaultRoutes = append(s.DefaultRoutes, route) }
+			if route.Default {
+				s.DefaultRoutes = append(s.DefaultRoutes, route)
+			}
 		}
 	}
 	sort.Slice(s.Routes, func(i, j int) bool {
 		a, b := s.Routes[i], s.Routes[j]
 		if a.Family == b.Family {
-			if a.Interface == b.Interface { return a.Destination < b.Destination }
+			if a.Interface == b.Interface {
+				return a.Destination < b.Destination
+			}
 			return a.Interface < b.Interface
 		}
 		return a.Family < b.Family
@@ -324,8 +328,12 @@ func Evaluate(s Snapshot, sel Selection) Report {
 	// Legacy snapshots/tests can provide default routes separately.
 	if len(s.Routes) == 0 {
 		for _, route := range s.DefaultRoutes {
-			if sel.Guest != "" && route.Interface == sel.Guest { add("guest_route", "guest interface has a default route") }
-			if sel.Uplink != "" && route.Interface != sel.Uplink { add("default_route_not_uplink", "default route does not use uplink") }
+			if sel.Guest != "" && route.Interface == sel.Guest {
+				add("guest_route", "guest interface has a default route")
+			}
+			if sel.Uplink != "" && route.Interface != sel.Uplink {
+				add("default_route_not_uplink", "default route does not use uplink")
+			}
 		}
 	}
 	if s.IPv4Forwarding == nil || *s.IPv4Forwarding {
@@ -339,10 +347,16 @@ func Evaluate(s Snapshot, sel Selection) Report {
 	if haveManagement && haveUplink {
 		for _, left := range management.Addresses {
 			a, err := netip.ParsePrefix(left)
-			if err != nil { add("invalid_management_address", "management address cannot be parsed"); continue }
+			if err != nil {
+				add("invalid_management_address", "management address cannot be parsed")
+				continue
+			}
 			for _, right := range uplink.Addresses {
 				b, err := netip.ParsePrefix(right)
-				if err != nil { add("invalid_uplink_address", "uplink address cannot be parsed"); continue }
+				if err != nil {
+					add("invalid_uplink_address", "uplink address cannot be parsed")
+					continue
+				}
 				if a.Addr().Is4() == b.Addr().Is4() && a.Overlaps(b) {
 					add("management_uplink_overlap", "management and uplink address prefixes overlap")
 				}
@@ -369,7 +383,9 @@ func readIntSysctl(path string, problems *[]string) *int {
 
 func readBoolSysctl(path string, problems *[]string) *bool {
 	n := readIntSysctl(path, problems)
-	if n == nil { return nil }
+	if n == nil {
+		return nil
+	}
 	if *n != 0 && *n != 1 {
 		*problems = append(*problems, "unexpected boolean sysctl "+path)
 		return nil
