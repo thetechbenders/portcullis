@@ -40,8 +40,9 @@ drop-counter, expiry, revoke, and topology assertions remain in place.
 ## Validation and limits
 
 Local Go 1.26.10: unit tests, build, both vet modes, tagged enforcement tests,
-gofmt, Python relay tests, and shell/Python syntax checks passed. Local race tests
-require a C compiler and were run in CI instead. The local host is `hephaestus`;
+gofmt, Python relay tests, and shell/Python syntax checks passed. Initially, local
+race testing lacked a C compiler and was performed in CI; the subsequent local
+race run is recorded below. The local host is `hephaestus`;
 the lab's protected-host refusal was preserved. Local browser-only `about:blank`
 checks succeeded but did not reproduce the CI failure. Browser runtime libraries
 were extracted under `/tmp` for these unprivileged checks; no system packages or
@@ -53,3 +54,26 @@ passed all three jobs at code commit `c473812fe18701624d472b0dac1321fd1415cf18`
 1 second, then the real-browser rendering/JavaScript assertions, full kernel e2e
 suite, and demo lifecycle passed. This confirms the final browser path works;
 it does not deterministically reproduce or explain the earlier 30-second stall.
+
+## Follow-up with the system toolchain
+
+On the same date, `go test -race -count=1 ./...` passed locally at `36ac248`
+using system Go 1.26.8, GCC 15.2.0, and `CGO_ENABLED=1`. There were no race reports.
+The log is `/tmp/portcullis-pr20-local-validation/race-go1.26.8.log` on Hephaestus.
+
+[Final documented-head CI run 42123106150](https://github.com/thetechbenders/portcullis/actions/runs/42123106150)
+passed all jobs at `36ac248096c9a67f61375b6bb427e15792010ee4` (tested merge
+`410a224`). Chrome returned 0 after **28 seconds**, followed by successful browser,
+kernel e2e, and demo lifecycle checks. The 1-second versus 28-second successful
+renders on fresh runners support retaining startup headroom, but do not identify
+the cause of the latency variation.
+
+Six further unprivileged, fresh-profile local `about:blank` controls alternated
+normal D-Bus selection and explicit unavailable D-Bus addresses, with both orders
+represented. All rendered successfully in 0.427-0.464 seconds and all emitted
+D-Bus errors. These used existing Chrome for Testing 156.0.8078.4, rather than
+CI's Chrome 156.0.8078.79, and exercised no guest networking. They reproduce the
+nonfatal log messages, not the original startup stall, and give no local evidence
+that changing D-Bus settings would fix the CI latency. Logs and timings are under
+`/tmp/portcullis-pr20-local-validation/`. No network-lab restrictions, guard rules,
+or browser settings in the harness were changed during this follow-up.
