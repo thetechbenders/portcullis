@@ -56,6 +56,7 @@ type Snapshot struct {
 	ObservedAt     string      `json:"observed_at"`
 	IPv4Forwarding *bool       `json:"ipv4_forwarding,omitempty"`
 	IPv6Forwarding *bool       `json:"ipv6_forwarding,omitempty"`
+	IPv6Unavailable bool `json:"ipv6_unavailable,omitempty"`
 	Routes         []Route     `json:"routes"`
 	Hostname       string      `json:"hostname,omitempty"`
 	OS             string      `json:"os"`
@@ -111,7 +112,11 @@ func Collect() Snapshot {
 		s.InventoryError = append(s.InventoryError, "boot id: "+err.Error())
 	}
 	s.IPv4Forwarding = readBoolSysctl("/proc/sys/net/ipv4/ip_forward", &s.InventoryError)
-	s.IPv6Forwarding = readBoolSysctl("/proc/sys/net/ipv6/conf/all/forwarding", &s.InventoryError)
+	if _, err := os.Stat("/proc/sys/net/ipv6/conf/all/forwarding"); os.IsNotExist(err) {
+		s.IPv6Unavailable = true
+	} else {
+		s.IPv6Forwarding = readBoolSysctl("/proc/sys/net/ipv6/conf/all/forwarding", &s.InventoryError)
+	}
 	if name, err := os.Hostname(); err == nil {
 		s.Hostname = name
 	} else {
@@ -138,15 +143,17 @@ func Collect() Snapshot {
 			} else if path, err := filepath.EvalSymlinks(base); err == nil {
 				item.SysfsPath = path
 			}
-			item.IPv6Disabled = readBoolSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "disable_ipv6"), &s.InventoryError)
-			item.AcceptRA = readIntSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "accept_ra"), &s.InventoryError)
+			if !s.IPv6Unavailable {
+				item.IPv6Disabled = readBoolSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "disable_ipv6"), &s.InventoryError)
+				item.AcceptRA = readIntSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "accept_ra"), &s.InventoryError)
+			}
 			item.MACAssignType = readIntSysctl(filepath.Join(base, "addr_assign_type"), &s.InventoryError)
 			item.IPv4Forwarding = readBoolSysctl(filepath.Join("/proc/sys/net/ipv4/conf", ni.Name, "forwarding"), &s.InventoryError)
-			item.IPv6Forwarding = readBoolSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "forwarding"), &s.InventoryError)
+			if !s.IPv6Unavailable { item.IPv6Forwarding = readBoolSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "forwarding"), &s.InventoryError) }
 			// force_forwarding is kernel-version dependent; missing is explicitly unassessed, not silently false.
-			if _, err := os.Stat(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "force_forwarding")); err == nil {
+			if !s.IPv6Unavailable { if _, err := os.Stat(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "force_forwarding")); err == nil {
 				item.IPv6ForceForwarding = readBoolSysctl(filepath.Join("/proc/sys/net/ipv6/conf", ni.Name, "force_forwarding"), &s.InventoryError)
-			}
+			} }
 			if path, err := filepath.EvalSymlinks(filepath.Join(base, "device/driver")); err == nil {
 				item.Driver = filepath.Base(path)
 			}
@@ -214,6 +221,14 @@ func Collect() Snapshot {
 		}
 		return a.Family < b.Family
 	})
+	// Detect interface churn across the observation window, not just within one NIC read.
+	if after, err := net.Interfaces(); err != nil { s.InventoryError = append(s.InventoryError, "interface re-enumeration: "+err.Error()) } else {
+		before := map[string]int{}
+		for _, nic := range s.Interfaces { before[nic.Name] = nic.Index }
+		if len(after) != len(before) { s.InventoryError = append(s.InventoryError, "interface inventory changed during collection") } else {
+			for _, nic := range after { if before[nic.Name] != nic.Index { s.InventoryError = append(s.InventoryError, "interface inventory changed during collection"); break } }
+		}
+	}
 	sort.Slice(s.DefaultRoutes, func(i, j int) bool {
 		a, b := s.DefaultRoutes[i], s.DefaultRoutes[j]
 		if a.Family == b.Family {
@@ -255,6 +270,7 @@ func Evaluate(s Snapshot, sel Selection) Report {
 		PlanSHA256: fmt.Sprintf("%x", digest), Selection: sel,
 		Hazards: []Finding{}, NotAssessed: []string{
 			"IPv4 policy rules and non-main routing tables are not observed by procfs",
+			"interface enumeration and routes are non-atomic; rapid rename-and-revert can evade detection",
 			"NetworkManager/systemd-networkd and other interface ownership is unverified",
 			"nftables guard, legacy firewall, tc/XDP and bypass paths are not attested",
 			"independent guest exposure gate and physical recovery are unverified",
@@ -295,7 +311,7 @@ func Evaluate(s Snapshot, sel Selection) Report {
 			{nic.IPv6Forwarding, "interface_ipv6_forwarding"},
 			{nic.IPv6ForceForwarding, "interface_ipv6_force_forwarding"},
 		} {
-			if state.value != nil && *state.value {
+			if (state.value != nil && *state.value) && !(s.IPv6Unavailable && strings.HasPrefix(state.code, "interface_ipv6")) {
 				add(state.code, "per-interface forwarding enabled on "+nic.Name)
 			}
 		}
@@ -333,10 +349,10 @@ func Evaluate(s Snapshot, sel Selection) Report {
 			if guest.MACAssignType == nil || *guest.MACAssignType != 0 {
 				add("guest_mac_not_permanent", "guest MAC is not confirmed as a permanent hardware assignment")
 			}
-			if guest.IPv6Disabled == nil || !*guest.IPv6Disabled {
+			if !s.IPv6Unavailable && (guest.IPv6Disabled == nil || !*guest.IPv6Disabled) {
 				add("guest_ipv6_enabled", "guest IPv6 disable state is not confirmed as disabled")
 			}
-			if guest.AcceptRA == nil || *guest.AcceptRA != 0 {
+			if !s.IPv6Unavailable && (guest.AcceptRA == nil || *guest.AcceptRA != 0) {
 				add("guest_accept_ra", "guest IPv6 router advertisements are not confirmed disabled")
 			}
 			if guest.SysfsPath == "" || sel.PinnedGuestSysfs == "" {
@@ -389,7 +405,7 @@ func Evaluate(s Snapshot, sel Selection) Report {
 	if s.IPv4Forwarding == nil || *s.IPv4Forwarding {
 		add("ipv4_forwarding_active_or_unknown", "IPv4 forwarding must be verified disabled before initial exposure")
 	}
-	if s.IPv6Forwarding == nil || *s.IPv6Forwarding {
+	if !s.IPv6Unavailable && (s.IPv6Forwarding == nil || *s.IPv6Forwarding) {
 		add("ipv6_forwarding_active_or_unknown", "IPv6 forwarding must be verified disabled")
 	}
 	management, haveManagement := byName[sel.Management]
