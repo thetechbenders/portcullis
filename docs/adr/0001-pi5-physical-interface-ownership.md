@@ -1,6 +1,6 @@
 # ADR-001 (proposed): Raspberry Pi 5 physical interface ownership and safe boot
 
-**Status:** Revised proposed design after independent review / design-only. **Issue:** [#10](https://github.com/thetechbenders/portcullis/issues/10).  
+**Status:** Proposed, not accepted; design-only. **Issue:** [#10](https://github.com/thetechbenders/portcullis/issues/10).  
 **Date:** 2026-11-05. **Target:** Pi 5, Raspberry Pi OS Trixie, ARM64.  
 **Decision authority:** Requires operator review; **no physical deployment authorized**.
 
@@ -16,7 +16,7 @@ References: [Formnext design](../formnext-design.md), [integration evidence](../
 
 ## Proposed decision
 
-**A host adapter, independent of the grant/controller state machine, owns only an explicitly nominated guest interface and its boot-time exposure.** Its default is *not exposed*. It can request exposure only after an independent preflight confirms physical topology, boot-restored guard hooks, controller readiness, and the absence of known bypass paths. The guest link must be isolated before first installation, migration, or recovery. Neither successful `systemctl start` nor a daemon status string constitutes packet isolation evidence.
+**A host adapter, independent of the grant/controller state machine, owns only an explicitly nominated guest interface and its boot-time exposure.** Its default is *not exposed*. It can request exposure only after distinct inventory, plan validation, privileged guard/topology attestation, and explicit operator authorization. The guest link must be isolated before first installation, migration, or recovery. Neither successful `systemctl start` nor a daemon status string constitutes packet isolation evidence.
 
 This requires two different protections:
 
@@ -54,13 +54,13 @@ This is an **illustrative candidate**, not an allocation: no USB NIC identifier,
 | Third-party firewalls, Docker, legacy iptables, nft/tc/XDP | Other owners; preflight inventories and monitors them | Known bypass, unexpected hooks/flows, unsupported conflicts and reloads halt exposure; do not silently rewrite another owner's rules |
 | Local operator / recovery | Human operator, independent management path | No guest-facing administration or remote shell service added by the adapter |
 
-A NetworkManager "unmanaged guest" profile or per-device exclusion would be part of a **separately reviewed install**, not a prerequisite to writing this ADR. Never disable NetworkManager globally. Service-order dependencies are necessary but cannot prevent all early-boot races, privileged administrator changes, flow offload, firmware/AP bypass, or outside-of-namespace forwarding.
+NetworkManager guest exclusion is **mandatory before any unattended guest activation** and part of a separately reviewed installer; it is not implemented by this ADR. Guest IPv6 must be disabled before activation. Never disable NetworkManager globally. Service-order dependencies are necessary but cannot prevent all early-boot races, privileged administrator changes, flow offload, firmware/AP bypass, or outside-of-namespace forwarding.
 
 ### Preflight inventory, read-only and explicit
 
-The eventual `portcullis-host preflight --dry-run` should produce a bounded, redacted machine-readable report and refuse all ambiguous cases:
+The implemented read-only `portcullis-host inventory` and `portcullis-host check -plan FILE` provide partial, bounded evidence; the later privileged attestation must separately cover:
 
-- Pi/OS/kernel/build identifier and 16K-page ARM64 compatibility; guard schema/version expected by the binary.
+- Pi/OS/kernel/build identifier and expected guard schema/version. ARM64 page-size compatibility is tracked separately in PR #17.
 - Physical NIC identity: name, permanent/current MAC, interface index, sysfs device path, driver, carrier, master/uppers, expected link peer if independently known, NetworkManager/systemd-networkd ownership.
 - All IPv4/IPv6 addresses, routes, rules, DHCP clients, forwarding sysctls, RA/DHCPv6, expected guest/uplink/management CIDRs, collision with localhost, private/protected, link-local, CGNAT and VPN destinations.
 - Entire effective nftables base-chain/flowtable inventory and compatibility with legacy iptables, Docker/firewalld, tc, XDP, VLAN/bridge/macvlan/ipvlan and hardware acceleration. Unknown or opaque forwarding paths fail preflight.
@@ -73,7 +73,7 @@ The inventory is not proof of future isolation. Any change in links, firewall ow
 
 1. **Cold/power-loss start:** The guest cable is disconnected for the first pilot. For later unattended operation, the guest must be excluded from automatic network-manager ownership while a versioned early-boot one-shot installs the nftables guard afresh before device activation. Any missing or failed prerequisite forbids exposure. Management remains under its existing owner.
 2. **Preflight:** Resolve pinned physical interfaces and address plan; reject drift, collision, unexpected manager, forwarding path, insecure neighbor route, schema mismatch or unverified control of guest exposure. Read-only inventory must not claim attestation.
-3. **Guard installation:** While guest is physically isolated and administratively DOWN, bootstrap the guard **only if it is absent**, then read back exact hook/policy/set structure and full bypass/topology attestation. An existing unfamiliar table is an error; do not flush/replace it.
+3. **Guard installation on every cold boot:** With guest excluded from all automatic managers and not exposed, an early-boot one-shot installs the versioned guard before network activation, then reads back exact hooks/policy/sets and bypass/topology. For first installation or offline migration, the cable must also be disconnected. An existing unfamiliar table is an error; never flush or replace live rules.
 4. **Controller startup:** Attest, revoke inherited grants, confirm absence of authorization and start the controller/portal. Readiness must mean verified kernel state **and** live restricted services, not merely process start or PID file creation.
 5. **Operator-controlled exposure:** Only after verified guard hooks, trusted manager ownership, time-bounded operator authorization and explicit test approval may activation enable the pinned guest link. For the first wired pilot the operator manually connects the guest cable. Any drift revokes future grants and must be reported without claiming isolation was automatically confirmed.
 6. **Graceful stop/restart:** First isolate the guest exposure path and independently verify it; only then stop network services or perform offline version migration. Keep baseline deny. Controller stop without verified isolation does not authorize removing the guard.
@@ -121,13 +121,11 @@ A CI status or in-namespace packet test is **not** a physical hardware safety ce
 **Gate 4: Shared AP/internet (separate issue acceptance).** Do not attach real wireless guests without [#11](https://github.com/thetechbenders/portcullis/issues/11) association/trust model and client isolation. Do not claim general internet access until [#13](https://github.com/thetechbenders/portcullis/issues/13) post-grant DNS/NAT and [#12](https://github.com/thetechbenders/portcullis/issues/12) policy migration pass. Venue radio/network permission is an independent requirement.
 
 
-## Revised boot-time ownership and bypass contract
+## Remaining security decisions and evidence stages
 
-The initial draft failed to distinguish reboot from daemon restart. **The kernel does not persist nftables tables through reboot.** The next adapter design must include an isolated early-boot guard installation step and independent network-manager prevention of guest autoconnect, DHCP clients and RA acceptance before any link may be raised.
+A candidate guard unit would use `DefaultDependencies=no`, `Before=network-pre.target NetworkManager.service` and `Wants=network-pre.target`, but these are **unvalidated design inputs**, not approved unit files. The guest must be unmanaged, unable to autoconnect/DHCP/accept RA, and physically disconnected for first installation. Unit ordering alone is not packet isolation.
 
-A candidate systemd one-shot ordering is `DefaultDependencies=no`, `Before=network-pre.target NetworkManager.service`, `Wants=network-pre.target`, but **these values are design inputs, not approved unit files**. They cannot alone defeat udev activation, a manager not covered by the unit graph, or an external link already connected before userspace. Treat manager ownership, interface naming, security and restart semantics as a combined dependency, and test them under a disposable VM with cold boot and delayed-service fault injection.
-
-- **Device binding:** The present guard has guest-specific `iifname` matches and `policy accept` base-chain defaults. An unrecognized guest interface name can therefore escape its intended rules. An explicit `.link` name pinned to a physical device identity may reduce accidental rename, but is not an independent kernel enforcement guarantee. Consider `policy drop` for the **dedicated** gateway's forward chain with deliberately scoped exceptions, and test legitimate host forwarding before changing [#12](https://github.com/thetechbenders/portcullis/issues/12)'s guard schema. The host INPUT path separately needs review; an indiscriminate INPUT drop risks management lockout.
+- **Device binding:** The present guard has guest-specific `iifname` matches and `policy accept` base-chain defaults. An unrecognized guest interface name can therefore escape its intended rules. An explicit `.link` name pinned to a physical device identity may reduce accidental rename, but is not an independent kernel enforcement guarantee. **Decision for the dedicated appliance:** adopt forward-chain `policy drop` in a separately reviewed guard schema revision; first verify there are no other legitimate host forwarders. The host INPUT policy remains an open security decision. Consider `policy drop` for the **dedicated** gateway's forward chain with deliberately scoped exceptions, and test legitimate host forwarding before changing [#12](https://github.com/thetechbenders/portcullis/issues/12)'s guard schema. The host INPUT path separately needs review; an indiscriminate INPUT drop risks management lockout.
 - **NetworkManager:** Inventory the actual Pi's `no-auto-default`, active profiles, match rules, IPv4 DHCP, IPv6 RA/autoconnect and any cloud-init/netplan/systemd-networkd ownership. The guest device needs narrowly scoped unmanaged handling, not a global NetworkManager disable. This must be validated read-only before any installation.
 - **Forwarding ownership:** Explicitly decide when `net.ipv4.ip_forward` may be enabled and who reverts it. A reviewed systemd failure/finalization handler could disable IPv4 forwarding, flush grants and bring the *guest* down after SIGKILL. This is a **host-global** knob: using it on a host with unrelated forwarding would be disruptive and is not automatically safe. IPv6 forwarding remains disabled for MVP. A process crash does not itself immediately remove existing kernel grants.
 - **nftables.service:** Verify whether a distro service is enabled and whether its ruleset starts with `flush ruleset`. Reloading it can destroy the Portcullis guard and expose the interface if another component raises/owns the link. Ensure the production ownership plan either prevents that interaction or proves isolation and closed failure on reload. Never repair by reconstructing active hooked chains without an isolated guest.
@@ -144,6 +142,13 @@ A candidate systemd one-shot ordering is `DefaultDependencies=no`, `Before=netwo
 5. **Mutating activation:** The sole component permitted to expose the guest, after immediately revalidating stages 1-3 and the operator decision. Must have a specifically tested cleanup/failure path.
 
 A positive test run of an unprivileged inventory tool is never evidence that cold-boot packet isolation was achieved. Neither PR #18 nor #19 implements stages 3-5.
+
+### Open decisions requiring owners
+
+- **Guard schema owner (#12):** design and test default-drop forwarding, preserving management INPUT/OUTPUT and legitimate gateway grants; no implementation approved by this ADR.
+- **Host lifecycle owner (#10):** decide and test crash cleanup, IPv4 forwarding ownership, NetworkManager unmanaged rules and early-boot guard unit in a disposable VM. Never disable unrelated forwarding.
+- **Firewall integration owner (#10):** prevent or explicitly block a distro `nftables.service` reload that would flush the guard; demonstrate fail-closed packet behavior.
+- **Input/output policy owner (#9/#10):** separately assess unknown-NIC ingress, management SSH preservation, and host-originated service leakage before installing any broad deny rule.
 
 ## Alternatives and open questions
 
