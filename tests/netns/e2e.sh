@@ -200,6 +200,21 @@ browser() {
     --resolve portal.localhost:80:127.0.0.1 "$@" 
 }
 browser "http://portal.localhost/" | grep -q 'Portcullis' || die 'portal browser relay failed'
+# Headless Chrome runs only on the disposable runner. This verifies
+# actual browser JS and the guest's accepted HTTP authority, not merely curl.
+command -v google-chrome >/dev/null || die 'Chrome required for browser acceptance'
+timeout 30s google-chrome --headless --no-sandbox --disable-gpu \
+  --disable-dev-shm-usage --disable-background-networking --no-proxy-server \
+  --no-first-run --no-default-browser-check --user-data-dir="$state/chrome-guest" \
+  --host-resolver-rules='MAP portal.localhost 127.0.0.1' \
+  --virtual-time-budget=5000 --dump-dom "http://portal.localhost/" \
+  > "$state/chrome-guest.html" 2> "$state/chrome-guest.log" \
+  || die 'headless Chrome could not load the guest portal'
+grep -q 'Get online' "$state/chrome-guest.html" \
+  || die 'real browser did not render the denied-state portal'
+if grep -q 'class="no-js"' "$state/chrome-guest.html"; then
+  die 'guest JavaScript did not execute in Chrome'
+fi
 browser "http://portal.localhost/api/session" > "$state/browser-session.json"
 python3 - "$state/browser-session.json" <<'PY'
 import json,sys
