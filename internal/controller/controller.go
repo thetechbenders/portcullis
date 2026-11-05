@@ -262,6 +262,18 @@ func (c *Controller) Start(ctx context.Context) error {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// An Unbind or another safety path may have degraded the controller
+	// while DHCP adoption ran without mu. Never report startup success after
+	// that terminal security transition.
+	if c.degraded {
+		c.phase = phaseFailed
+		return fmt.Errorf("%w: controller degraded during binding adoption: %s", ErrDegraded, c.reason)
+	}
+	if err := ctx.Err(); err != nil {
+		c.phase = phaseFailed
+		c.degradeLocked("startup context canceled during binding adoption")
+		return fmt.Errorf("%w: startup canceled during binding adoption: %v", ErrDegraded, err)
+	}
 	for _, b := range rejected {
 		c.unbindKernelLocked(b.Addr, b.MAC, "adoption rejected by DHCP")
 	}
