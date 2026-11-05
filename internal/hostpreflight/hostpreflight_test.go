@@ -229,3 +229,33 @@ func TestMissingIPv6RouteProcfsOnlyAllowedWhenIPv6Unavailable(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultForwardingHazards(t *testing.T) {
+	tests := []struct {
+		name string
+		ipv4, ipv6 bool
+		unavailable bool
+		want string
+	}{
+		{"IPv4 inherited forwarding", true, false, false, "ipv4_default_forwarding_enabled"},
+		{"IPv6 inherited forwarding", false, true, false, "ipv6_default_forwarding_enabled"},
+		{"IPv6 unavailable ignores stale default", false, true, true, ""},
+		{"defaults disabled", false, false, false, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s, sel := fixture()
+			s.IPv4DefaultForwarding = boolPtr(tc.ipv4)
+			s.IPv6DefaultForwarding = boolPtr(tc.ipv6)
+			s.IPv6Unavailable = tc.unavailable
+			got := codes(Evaluate(s, sel))
+			if tc.want == "" {
+				if slices.Contains(got, "ipv4_default_forwarding_enabled") || slices.Contains(got, "ipv6_default_forwarding_enabled") {
+					t.Fatalf("unexpected inherited forwarding hazard: %v", got)
+				}
+			} else if !slices.Contains(got, tc.want) {
+				t.Fatalf("expected %s in %v", tc.want, got)
+			}
+		})
+	}
+}
