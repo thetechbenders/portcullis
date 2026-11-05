@@ -113,14 +113,14 @@ func TestDenyAttestationTopLevelNamesAreLiteral(t *testing.T) {
 	listing := strings.TrimPrefix(s, `{"nftables":`)
 	listing = strings.TrimSuffix(listing, "}")
 	cases := map[string]string{
-		"uppercase only": `{"NFTABLES":` + listing + "}",
-		"mixed case only": `{"Nftables":` + listing + "}",
-		"unicode folded only": `{"nftableſ":` + listing + "}",
-		"unicode escaped only": `{"nftable\\u017f":` + listing + "}",
-		"uppercase duplicate safe last": `{"nftables":[],"NFTABLES":` + listing + "}",
+		"uppercase only":                 `{"NFTABLES":` + listing + "}",
+		"mixed case only":                `{"Nftables":` + listing + "}",
+		"unicode folded only":            `{"nftableſ":` + listing + "}",
+		"unicode escaped only":           `{"nftable\\u017f":` + listing + "}",
+		"uppercase duplicate safe last":  `{"nftables":[],"NFTABLES":` + listing + "}",
 		"uppercase duplicate safe first": `{"NFTABLES":[], "nftables":` + listing + "}",
-		"unicode duplicate safe last": `{"nftables":[],"nftableſ":` + listing + "}",
-		"unicode escaped duplicate": `{"nftables":[],"nftable\\u017f":` + listing + "}",
+		"unicode duplicate safe last":    `{"nftables":[],"nftableſ":` + listing + "}",
+		"unicode escaped duplicate":      `{"nftables":[],"nftable\\u017f":` + listing + "}",
 	}
 	for name, input := range cases {
 		t.Run(name, func(t *testing.T) {
