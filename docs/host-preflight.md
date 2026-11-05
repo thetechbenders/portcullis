@@ -32,6 +32,25 @@ echo "status=$?" # expected: 3
 
 This produces full observational evidence and blockers for unselected interfaces. Never commit this JSON, since it can contain real IP addresses, device paths and MACs. Use a private directory and `umask 077` if redirecting output.
 
+## Versioned operator-pinned topology
+
+For repeatable evidence, store a private **plan**, not a live network configuration. A schema-valid plan still never authorizes deployment. These example identifiers are fictional and must not be used without checking the actual Pi.
+
+```json
+{
+  "schema_version": 1,
+  "selection": {
+    "guest": "usb0",
+    "uplink": "eth0",
+    "management": "wlan0",
+    "pinned_guest_mac": "02:22:33:44:55:66",
+    "pinned_guest_sysfs": "/sys/devices/pci0000/usb0"
+  }
+}
+```
+
+Run a passive comparison using `portcullis-host preflight -plan private-host-plan.json`. The parser limits input to 8192 bytes, rejects unknown fields, trailing data, invalid names, ambiguous roles, bad MACs and unclean non-sysfs identity paths. Combining `-plan` with individual role flags is prohibited. Nothing is applied to the network.
+
 ## Example: operator-pinned *candidate* wired topology
 
 Do not copy these names or addresses blindly. First inspect the inventory to identify actual NICs and physical USB paths. The following values are **illustrative only**.
