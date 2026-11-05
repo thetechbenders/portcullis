@@ -57,6 +57,8 @@ func TestParsePlanRejectsAmbiguityAndBadPins(t *testing.T) {
 		{"role collision", strings.Replace(validHostPlan, "\"uplink\":\"eth0\"", "\"uplink\":\"usb0\"", 1)},
 		{"bad interface name", strings.Replace(validHostPlan, "\"guest\":\"usb0\"", "\"guest\":\"../usb0\"", 1)},
 		{"multicast MAC", strings.Replace(validHostPlan, "\"02:22:33:44:55:66\"", "\"01:22:33:44:55:66\"", 1)},
+		{"missing uplink pin", strings.Replace(validHostPlan, "\"pinned_uplink_mac\":\"dc:a6:32:aa:bb:cc\"", "\"pinned_uplink_mac\":\"\"", 1)},
+		{"missing management pin", strings.Replace(validHostPlan, "\"pinned_management_sysfs\":\"/sys/devices/platform/soc/wlan0\"", "\"pinned_management_sysfs\":\"\"", 1)},
 		{"missing MAC", strings.Replace(validHostPlan, "\"pinned_guest_mac\":\"02:22:33:44:55:66\"", "\"pinned_guest_mac\":\"\"", 1)},
 		{"non sysfs path", strings.Replace(validHostPlan, "\"/sys/devices/pci0000/usb0\"", "\"/tmp/usb0\"", 1)},
 		{"unclean sysfs path", strings.Replace(validHostPlan, "\"/sys/devices/pci0000/usb0\"", "\"/sys/devices/../usb0\"", 1)},
