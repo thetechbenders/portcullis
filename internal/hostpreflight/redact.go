@@ -56,6 +56,7 @@ func RedactSnapshot(s Snapshot) Snapshot {
 	s.BootID = ""
 	s.Interfaces = append([]Interface(nil), s.Interfaces...)
 	for i := range s.Interfaces {
+		s.Interfaces[i].Uppers = append([]string(nil), s.Interfaces[i].Uppers...)
 		s.Interfaces[i].Name = redactor.name(s.Interfaces[i].Name)
 		s.Interfaces[i].Master = redactor.name(s.Interfaces[i].Master)
 		for j := range s.Interfaces[i].Uppers {
