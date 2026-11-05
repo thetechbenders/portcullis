@@ -195,6 +195,7 @@ func TestGloballyUnavailableIPv6IsNotAFalseAlarm(t *testing.T) {
 		t.Fatalf("disabled IPv6 should not cause hazards: %v", got)
 	}
 }
+
 func TestRedactedReportKeepsPseudonymousBootCorrelation(t *testing.T) {
 	s, sel := fixture()
 	s.BootID = "private-boot-id"
@@ -202,5 +203,60 @@ func TestRedactedReportKeepsPseudonymousBootCorrelation(t *testing.T) {
 	b := RedactReport(Evaluate(s, sel))
 	if a.BootID == "" || a.BootID != b.BootID || a.BootID == s.BootID {
 		t.Fatalf("bad boot correlation: %q", a.BootID)
+	}
+}
+
+func TestMissingIPv6RouteProcfsOnlyAllowedWhenIPv6Unavailable(t *testing.T) {
+	missing := os.ErrNotExist
+	denied := os.ErrPermission
+	cases := []struct {
+		name, family string
+		unavailable  bool
+		err          error
+		want         bool
+	}{
+		{"disabled IPv6 and missing route", "ipv6", true, missing, true},
+		{"enabled IPv6 and missing route", "ipv6", false, missing, false},
+		{"disabled IPv6 but permission denied", "ipv6", true, denied, false},
+		{"IPv4 missing route", "ipv4", true, missing, false},
+		{"disabled IPv6 but malformed route", "ipv6", true, os.ErrInvalid, false},
+		{"disabled IPv6 and no error", "ipv6", true, nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldIgnoreMissingIPv6Routes(tc.family, tc.unavailable, tc.err); got != tc.want {
+				t.Fatalf("ignore=%v want=%v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDefaultForwardingHazards(t *testing.T) {
+	tests := []struct {
+		name        string
+		ipv4, ipv6  bool
+		unavailable bool
+		want        string
+	}{
+		{"IPv4 inherited forwarding", true, false, false, "ipv4_default_forwarding_enabled"},
+		{"IPv6 inherited forwarding", false, true, false, "ipv6_default_forwarding_enabled"},
+		{"IPv6 unavailable ignores stale default", false, true, true, ""},
+		{"defaults disabled", false, false, false, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s, sel := fixture()
+			s.IPv4DefaultForwarding = boolPtr(tc.ipv4)
+			s.IPv6DefaultForwarding = boolPtr(tc.ipv6)
+			s.IPv6Unavailable = tc.unavailable
+			got := codes(Evaluate(s, sel))
+			if tc.want == "" {
+				if slices.Contains(got, "ipv4_default_forwarding_enabled") || slices.Contains(got, "ipv6_default_forwarding_enabled") {
+					t.Fatalf("unexpected inherited forwarding hazard: %v", got)
+				}
+			} else if !slices.Contains(got, tc.want) {
+				t.Fatalf("expected %s in %v", tc.want, got)
+			}
+		})
 	}
 }
