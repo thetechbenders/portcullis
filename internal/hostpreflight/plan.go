@@ -81,17 +81,28 @@ func ValidateSelection(sel Selection) (Selection, error) {
 	if sel.Guest == sel.Uplink || sel.Guest == sel.Management || sel.Uplink == sel.Management {
 		return Selection{}, errors.New("host interface roles must differ")
 	}
-	mac, err := net.ParseMAC(sel.PinnedGuestMAC)
-	if err != nil || len(mac) != 6 || mac[0]&1 != 0 {
-		return Selection{}, errors.New("host plan requires a six-byte unicast guest MAC pin")
+	pins := []struct {
+		role string
+		mac *string
+		path string
+	}{
+		{"guest", &sel.PinnedGuestMAC, sel.PinnedGuestSysfs},
+		{"uplink", &sel.PinnedUplinkMAC, sel.PinnedUplinkSysfs},
+		{"management", &sel.PinnedManagementMAC, sel.PinnedManagementSysfs},
 	}
-	sel.PinnedGuestMAC = mac.String()
-	if !strings.HasPrefix(sel.PinnedGuestSysfs, "/sys/devices/") ||
-		strings.HasPrefix(sel.PinnedGuestSysfs, "/sys/devices/virtual/") ||
-		strings.Contains(sel.PinnedGuestSysfs, "/net/") ||
-		filepath.Clean(sel.PinnedGuestSysfs) != sel.PinnedGuestSysfs ||
-		strings.ContainsAny(sel.PinnedGuestSysfs, "\x00\n\r") {
-		return Selection{}, errors.New("host plan requires a canonical sysfs device path under /sys/devices")
+	for _, pin := range pins {
+		mac, err := net.ParseMAC(*pin.mac)
+		if err != nil || len(mac) != 6 || mac[0]&1 != 0 {
+			return Selection{}, fmt.Errorf("host plan requires a six-byte unicast %s MAC pin", pin.role)
+		}
+		*pin.mac = mac.String()
+		if !strings.HasPrefix(pin.path, "/sys/devices/") ||
+			strings.HasPrefix(pin.path, "/sys/devices/virtual/") ||
+			strings.Contains(pin.path, "/net/") ||
+			filepath.Clean(pin.path) != pin.path ||
+			strings.ContainsAny(pin.path, "\x00\n\r") {
+			return Selection{}, fmt.Errorf("host plan requires a canonical physical %s sysfs parent path", pin.role)
+		}
 	}
 	return sel, nil
 }
@@ -163,7 +174,7 @@ func rejectDuplicateJSONKeys(data []byte) error {
 // fail even if encoding/json would otherwise match them case-insensitively.
 func validHostPlanKey(key string) bool {
 	switch key {
-	case "schema_version", "selection", "guest", "uplink", "management", "pinned_guest_mac", "pinned_guest_sysfs":
+	case "schema_version", "selection", "guest", "uplink", "management", "pinned_guest_mac", "pinned_guest_sysfs", "pinned_uplink_mac", "pinned_uplink_sysfs", "pinned_management_mac", "pinned_management_sysfs":
 		return true
 	default:
 		return false
