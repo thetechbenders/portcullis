@@ -6,7 +6,7 @@ import (
  "regexp"
 )
 
-var macInterfaceName = regexp.MustCompile(`(?i)^enx[0-9a-f]{12})
+var macInterfaceName = regexp.MustCompile("(?i)^enx[0-9a-f]{12}$")
 
 func redactInterfaceName(name string) string {
  if macInterfaceName.MatchString(name) {
