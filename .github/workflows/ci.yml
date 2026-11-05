@@ -27,6 +27,8 @@ jobs:
         run: |
           gofmt -d .
           test -z "$(gofmt -l .)"
+      - name: Python relay unit tests
+        run: python3 -m unittest discover -s demo -p 'test_*.py' -v
       - name: Script syntax
         run: |
           bash -n tests/netns/run.sh tests/netns/e2e.sh demo/portcullis-lab.sh

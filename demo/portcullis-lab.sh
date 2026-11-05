@@ -22,7 +22,7 @@ state=/run/portcullis-demo
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ns_gw=pcdemo-gw ns_ap=pcdemo-ap ns_a=pcdemo-guestA ns_b=pcdemo-guestB ns_wan=pcdemo-wan ns_lan=pcdemo-lan
 mac_a=02:00:00:00:0a:01 mac_b=02:00:00:00:0b:01
-guest_port=9080 demo_port=9081 dash_port=8788
+guest_port=80 demo_port=9081 dash_port=8788
 
 die() { echo "portcullis-lab: $*" >&2; exit 1; }
 need_root() { (( EUID == 0 )) || die "must run as root on a disposable demo machine"; }
@@ -167,6 +167,9 @@ EOF
   start_bg demo-www ip netns exec $ns_wan python3 -m http.server --bind 198.18.0.2 --directory "$state/www" 8080
   dhcp_guest $ns_a
   dhcp_guest $ns_b
+  # Use host loopback port 80: preserving the browser's Host and Origin is
+  # essential to the portal's strict authority and CSRF checks. Do not
+  # rewrite either header or weaken the actual portal validation.
   start_bg proxy-portal python3 "$root/demo/nsproxy.py" --netns $ns_a --listen-port $guest_port \
     --target-host 10.203.0.1 --target-port 80 --ready "$state/proxy-portal.ready"
   start_bg proxy-demo python3 "$root/demo/nsproxy.py" --netns $ns_a --listen-port $demo_port \
@@ -179,7 +182,7 @@ EOF
   cat <<EOF
 
 Portcullis demo lab is up.
-  Guest A portal (as seen from guest A):  http://portal.localhost:$guest_port/
+  Guest A portal (as seen from guest A):  http://portal.localhost/
   Demo destination via guest A:           http://127.0.0.1:$demo_port/
   Operator dashboard (loopback only):     http://127.0.0.1:$dash_port/
   Operator token:                         $state/operator.token

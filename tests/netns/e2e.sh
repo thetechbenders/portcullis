@@ -30,6 +30,11 @@ cleanup() {
       ip -n "$ns" -6 neigh show || true
     done
   fi
+  # The host-loopback relays are host-namespace Python processes. Kill
+  # them explicitly before deleting guest namespaces.
+  for name in proxy-portal proxy-demo; do
+    [[ ! -f "$state/$name.pid" ]] || kill "$(cat "$state/$name.pid")" 2>/dev/null || true
+  done
   for ns in "$ns_a" "$ns_b" "$ns_ap" "$ns_wan" "$ns_lan" "$ns_gw"; do
     for pid in $(ip netns pids "$ns" 2>/dev/null); do kill "$pid" 2>/dev/null || true; done
   done
@@ -165,6 +170,48 @@ ip_a=$(ip -n "$ns_a" -4 -j addr show eth0 | python3 -c 'import json,sys; print(j
 [[ $ip_a == 10.203.0.100 ]] || die "unexpected DHCP fixture address: $ip_a"
 [[ $(session_state "$ns_a") == denied && $(session_state "$ns_b") == denied ]] || die 'initial state not denied'
 api "$ns_a" / > /dev/null
+
+# Disposable host-browser relay acceptance with the actual Host/Origin.
+# Port 80 preserves the portal's authority checks, not a rewritten header.
+start_bg proxy-portal python3 "$root/demo/nsproxy.py" --netns "$ns_a" --listen-port 80 \
+  --target-host 10.203.0.1 --target-port 80 --ready "$state/proxy-portal.ready"
+start_bg proxy-demo python3 "$root/demo/nsproxy.py" --netns "$ns_a" --listen-port 9081 \
+  --target-host 198.18.0.2 --target-port 8080 --ready "$state/proxy-demo.ready"
+wait_file "$state/proxy-portal.ready"
+wait_file "$state/proxy-demo.ready"
+browser() {
+  curl --noproxy '*' --silent --show-error --fail-with-body --max-time 8 \
+    --resolve portal.localhost:80:127.0.0.1 "$@" 
+}
+browser "http://portal.localhost/" | grep -q 'Portcullis' || die 'portal browser relay failed'
+browser "http://portal.localhost/api/session" > "$state/browser-session.json"
+python3 - "$state/browser-session.json" <<'PY'
+import json,sys
+x=json.load(open(sys.argv[1]))
+assert x["ok"] and x["session"]["state"] == "denied", x
+PY
+before=$(count guest-egress)
+curl --noproxy '*' --silent --show-error --max-time 8 \
+  --output "$state/browser-blocked.html" --write-out '%{http_code}' \
+  "http://127.0.0.1:9081/" > "$state/browser-blocked.status"
+[[ $(cat "$state/browser-blocked.status") == 504 ]] || die 'unauthorized browser relay did not time out'
+grep -q 'does not by itself prove a Portcullis firewall drop' "$state/browser-blocked.html" \
+  || die 'relay falsely attributed connection failure to the firewall'
+(( $(count guest-egress) > before )) || die 'missing real kernel drop for denied browser destination'
+browser -H 'Origin: http://portal.localhost' -H 'Content-Type: application/json' \
+  -H 'X-Portcullis-Request: 1' -d '{"duration_seconds":30}' \
+  "http://portal.localhost/api/access" > "$state/browser-granted.json"
+python3 - "$state/browser-granted.json" <<'PY'
+import json,sys
+x=json.load(open(sys.argv[1]))
+assert x["ok"] and x["session"]["state"] == "granted", x
+PY
+curl --noproxy '*' --silent --show-error --fail-with-body --max-time 8 \
+  "http://127.0.0.1:9081/" | grep -q "You're through." \
+  || die 'authorized browser destination failed despite kernel grant'
+ctl reset > /dev/null
+[[ $(session_state "$ns_a") == denied ]] || die 'browser grant not removed'
+echo 'PASS: browser relay Host/Origin, real kernel grant, destination and error attribution'
 probe "$ns_wan" 198.18.0.2 "$ns_a" deny guest-egress
 # DNS isolation: real UDP replies, not an external resolver.
 a python3 - <<'PY'

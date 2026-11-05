@@ -20,8 +20,8 @@ The launcher prints three URLs:
 
 | URL | What it shows |
 |---|---|
-| `http://portal.localhost:9080/` | The portal **as guest A sees it**. A relay inside guest A's namespace carries the browser's connection, so the gateway filters it as guest A's traffic. |
-| `http://127.0.0.1:9081/` | The demo destination **through guest A**. It loads only while guest A holds a kernel grant; otherwise the relay reports that the connection was dropped. |
+| `http://portal.localhost/` | The portal **as guest A sees it**. Host loopback port 80 preserves the HTTP Host and Origin accepted by the real portal. A relay originates the upstream connection inside guest A's namespace, so the kernel filters it as guest A's traffic. The disposable host's port 80 must be available. |
+| `http://127.0.0.1:9081/` | The demo destination **through guest A**. It loads only while guest A holds a kernel grant; otherwise the relay reports only that its upstream connection failed. Confirm actual firewall denial separately using nftables counters. |
 | `http://127.0.0.1:8788/` | The operator dashboard (loopback only; paste the token from `/run/portcullis-demo/operator.token`). |
 
 ## Script (about four minutes)
@@ -72,3 +72,18 @@ GitHub-hosted runners, builds the real processes and fails if a prerequisite is
 missing. It requires directional kernel drop counters and delivered positive
 controls for packet-denial assertions. Record the successful run before the show;
 a packet-test recording does not establish browser UX acceptance.
+
+## Browser relay verification
+
+The relay forwards bytes without rewriting Host or Origin. The portal relay
+listens on host loopback port **80**, not 9080, because the portal rejects a
+foreign HTTP authority. The browser must use `http://portal.localhost/` and
+requests carrying the same-origin `Origin: http://portal.localhost`.
+The disposable E2E job exercises those exact HTTP authorities and verifies
+that a guest-bound browser relay can request a real kernel grant and reach the
+uplink destination. The host port 80 must be free for the demo.
+
+A relay-generated 502/504 is *not* an enforcement verdict. Confirm packet
+denial using kernel counters, controller state, and positive connectivity
+controls. Manual browser/dashboard rehearsal on a disposable VM remains a
+separate acceptance step; CI HTTP requests do not prove browser UX.
