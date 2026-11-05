@@ -1,5 +1,8 @@
 name: One-off read-only Go format handoff
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - feat/pi5-readonly-host-preflight-2026-11-05
