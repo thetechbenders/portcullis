@@ -186,17 +186,21 @@ func TestPilotLinkLocalAndManagementDefaultAreNotHazards(t *testing.T) {
 }
 
 func TestGloballyUnavailableIPv6IsNotAFalseAlarm(t *testing.T) {
- s, sel := fixture()
- s.IPv6Unavailable = true
- s.IPv6Forwarding = nil
- s.Interfaces[1].IPv6Disabled = nil
- s.Interfaces[1].AcceptRA = nil
- if got := codes(Evaluate(s,sel)); len(got) != 0 { t.Fatalf("disabled IPv6 should not cause hazards: %v",got) }
+	s, sel := fixture()
+	s.IPv6Unavailable = true
+	s.IPv6Forwarding = nil
+	s.Interfaces[1].IPv6Disabled = nil
+	s.Interfaces[1].AcceptRA = nil
+	if got := codes(Evaluate(s, sel)); len(got) != 0 {
+		t.Fatalf("disabled IPv6 should not cause hazards: %v", got)
+	}
 }
 func TestRedactedReportKeepsPseudonymousBootCorrelation(t *testing.T) {
- s, sel := fixture()
- s.BootID = "private-boot-id"
- a := RedactReport(Evaluate(s,sel))
- b := RedactReport(Evaluate(s,sel))
- if a.BootID == "" || a.BootID != b.BootID || a.BootID == s.BootID { t.Fatalf("bad boot correlation: %q",a.BootID) }
+	s, sel := fixture()
+	s.BootID = "private-boot-id"
+	a := RedactReport(Evaluate(s, sel))
+	b := RedactReport(Evaluate(s, sel))
+	if a.BootID == "" || a.BootID != b.BootID || a.BootID == s.BootID {
+		t.Fatalf("bad boot correlation: %q", a.BootID)
+	}
 }
