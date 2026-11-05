@@ -86,5 +86,7 @@ kernel-backed snapshot and operator revoke through the real HTTP API. The host p
 
 A relay-generated 502/504 is *not* an enforcement verdict. Confirm packet
 denial using kernel counters, controller state, and positive connectivity
-controls. Manual browser/dashboard rehearsal on a disposable VM remains a
-separate acceptance step; CI HTTP requests do not prove browser UX.
+controls. The disposable CI now includes a headless Chrome portal render alongside
+real HTTP portal and dashboard API acceptance. Manual browser/dashboard
+rehearsal on the disposable Formnext VM remains a separate acceptance step:
+headless tests do not prove the physical demo environment or full operator UX.
