@@ -1,9 +1,9 @@
 package hostpreflight
 
 import (
-	"strings"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -74,11 +74,23 @@ func TestPlanCanonicalMACAndSafeFileType(t *testing.T) {
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "plan.json")
-	if err := os.WriteFile(path, []byte(validHostPlan), 0o600); err != nil { t.Fatal(err) }
-	if _, err := LoadPlan(path); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(path, []byte(validHostPlan), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadPlan(path); err != nil {
+		t.Fatal(err)
+	}
 	link := filepath.Join(dir, "plan-link.json")
-	if err := os.Symlink(path, link); err != nil { t.Fatal(err) }
-	if _, err := LoadPlan(link); err == nil { t.Fatal("symlink plans must be rejected") }
-	if err := os.Chmod(path, 0o666); err != nil { t.Fatal(err) }
-	if _, err := LoadPlan(path); err == nil { t.Fatal("world-writable plans must be rejected") }
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadPlan(link); err == nil {
+		t.Fatal("symlink plans must be rejected")
+	}
+	if err := os.Chmod(path, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadPlan(path); err == nil {
+		t.Fatal("world-writable plans must be rejected")
+	}
 }
