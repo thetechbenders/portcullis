@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -117,5 +118,30 @@ func TestBoundedProcReader(t *testing.T) {
 	}
 	if _, err := readBoundedLines(filepath.Join(t.TempDir(), "missing"), 20); err == nil {
 		t.Fatal("missing proc result must report an error")
+	}
+}
+
+
+func TestCollectorSmokeOnLinux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux-only procfs/sysfs inventory")
+	}
+	s := Collect()
+	if s.OS != "linux" || len(s.Interfaces) == 0 {
+		t.Fatalf("collector omitted essential host facts: %+v", s)
+	}
+	loopback := false
+	for _, nic := range s.Interfaces {
+		if nic.Loopback {
+			loopback = true
+			break
+		}
+	}
+	if !loopback {
+		t.Fatalf("collector did not report a loopback interface: %+v", s.Interfaces)
+	}
+	r := Evaluate(s, Selection{})
+	if r.DeploymentAuthorized || r.Status != "blocked" {
+		t.Fatal("observing a real Linux host must never authorize exposure")
 	}
 }
