@@ -278,6 +278,18 @@ func Evaluate(s Snapshot, sel Selection) Report {
 			} else if !strings.EqualFold(guest.MAC, sel.PinnedGuestMAC) {
 				add("guest_mac_mismatch", "observed guest MAC differs from operator-pinned MAC")
 			}
+			if strings.HasPrefix(guest.SysfsPath, "/sys/devices/virtual/") {
+				add("virtual_guest_interface", "guest device is a virtual interface, not an operator-pinned physical NIC")
+			}
+			if guest.MACAssignType == nil || *guest.MACAssignType != 0 {
+				add("guest_mac_not_permanent", "guest MAC is not confirmed as a permanent hardware assignment")
+			}
+			if guest.IPv6Disabled == nil || !*guest.IPv6Disabled {
+				add("guest_ipv6_enabled", "guest IPv6 disable state is not confirmed as disabled")
+			}
+			if guest.AcceptRA == nil || *guest.AcceptRA != 0 {
+				add("guest_accept_ra", "guest IPv6 router advertisements are not confirmed disabled")
+			}
 			if guest.SysfsPath == "" || sel.PinnedGuestSysfs == "" {
 				add("guest_path_unpinned", "guest sysfs identity is missing or not pinned")
 			} else if guest.SysfsPath != sel.PinnedGuestSysfs {
@@ -292,9 +304,40 @@ func Evaluate(s Snapshot, sel Selection) Report {
 			}
 		}
 	}
-	for _, def := range s.DefaultRoutes {
-		if def.Interface == sel.Guest && sel.Guest != "" {
-			add("guest_default_route", "a "+def.Family+" default route uses the proposed guest interface")
+	for _, route := range s.Routes {
+		if sel.Guest != "" && route.Interface == sel.Guest {
+			add("guest_route", "a "+route.Family+" route is configured through the candidate guest interface")
+		}
+		if route.Default && sel.Uplink != "" && route.Interface != sel.Uplink {
+			add("default_route_not_uplink", "a "+route.Family+" default route uses "+route.Interface+" rather than the nominated uplink")
+		}
+	}
+	// Legacy snapshots/tests can provide default routes separately.
+	if len(s.Routes) == 0 {
+		for _, route := range s.DefaultRoutes {
+			if sel.Guest != "" && route.Interface == sel.Guest { add("guest_route", "guest interface has a default route") }
+			if sel.Uplink != "" && route.Interface != sel.Uplink { add("default_route_not_uplink", "default route does not use uplink") }
+		}
+	}
+	if s.IPv4Forwarding == nil || *s.IPv4Forwarding {
+		add("ipv4_forwarding_active_or_unknown", "IPv4 forwarding must be verified disabled before initial exposure")
+	}
+	if s.IPv6Forwarding == nil || *s.IPv6Forwarding {
+		add("ipv6_forwarding_active_or_unknown", "IPv6 forwarding must be verified disabled")
+	}
+	management, haveManagement := byName[sel.Management]
+	uplink, haveUplink := byName[sel.Uplink]
+	if haveManagement && haveUplink {
+		for _, left := range management.Addresses {
+			a, err := netip.ParsePrefix(left)
+			if err != nil { add("invalid_management_address", "management address cannot be parsed"); continue }
+			for _, right := range uplink.Addresses {
+				b, err := netip.ParsePrefix(right)
+				if err != nil { add("invalid_uplink_address", "uplink address cannot be parsed"); continue }
+				if a.Addr().Is4() == b.Addr().Is4() && a.Overlaps(b) {
+					add("management_uplink_overlap", "management and uplink address prefixes overlap")
+				}
+			}
 		}
 	}
 	// These cannot be inferred from the read-only evidence above, even if all
