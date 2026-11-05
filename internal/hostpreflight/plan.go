@@ -27,6 +27,13 @@ type Plan struct {
 // LoadPlan reads a small local manifest without following it with any side
 // effect. The caller is responsible for keeping manifests private.
 func LoadPlan(path string) (Selection, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return Selection{}, err
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o022 != 0 {
+		return Selection{}, errors.New("host plan must be a regular non-writable-by-others file (symlinks and FIFOs refused)")
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return Selection{}, err
@@ -61,7 +68,11 @@ func ParsePlan(data []byte) (Selection, error) {
 	if p.SchemaVersion != SchemaVersion {
 		return Selection{}, fmt.Errorf("unsupported host plan schema %d", p.SchemaVersion)
 	}
-	sel := p.Selection
+	return ValidateSelection(p.Selection)
+}
+
+// ValidateSelection is shared by plan and individual CLI flags.
+func ValidateSelection(sel Selection) (Selection, error) {
 	for _, name := range []string{sel.Guest, sel.Uplink, sel.Management} {
 		if !interfaceName.MatchString(name) {
 			return Selection{}, fmt.Errorf("invalid or missing interface name %q", name)
@@ -74,7 +85,10 @@ func ParsePlan(data []byte) (Selection, error) {
 	if err != nil || len(mac) != 6 || mac[0]&1 != 0 {
 		return Selection{}, errors.New("host plan requires a six-byte unicast guest MAC pin")
 	}
+	sel.PinnedGuestMAC = mac.String()
 	if !strings.HasPrefix(sel.PinnedGuestSysfs, "/sys/devices/") ||
+		strings.HasPrefix(sel.PinnedGuestSysfs, "/sys/devices/virtual/") ||
+		strings.Contains(sel.PinnedGuestSysfs, "/net/") ||
 		filepath.Clean(sel.PinnedGuestSysfs) != sel.PinnedGuestSysfs ||
 		strings.ContainsAny(sel.PinnedGuestSysfs, "\x00\n\r") {
 		return Selection{}, errors.New("host plan requires a canonical sysfs device path under /sys/devices")
@@ -109,6 +123,11 @@ func rejectDuplicateJSONKeys(data []byte) error {
 				if !ok {
 					return errors.New("expected JSON object key")
 				}
+				// All schema keys are lowercase ASCII. Reject alternate casing
+				// before encoding/json can case-fold into another field.
+				if key != strings.ToLower(key) || !validHostPlanKey(key) {
+					return fmt.Errorf("unknown or non-canonical host plan key %q", key)
+				}
 				if _, exists := seen[key]; exists {
 					return fmt.Errorf("duplicate JSON key %q", key)
 				}
@@ -138,4 +157,15 @@ func rejectDuplicateJSONKeys(data []byte) error {
 		return errors.New("trailing JSON content")
 	}
 	return nil
+}
+
+// Only the exact documented key spellings are accepted. Unknown keys
+// fail even if encoding/json would otherwise match them case-insensitively.
+func validHostPlanKey(key string) bool {
+	switch key {
+	case "schema_version", "selection", "guest", "uplink", "management", "pinned_guest_mac", "pinned_guest_sysfs":
+		return true
+	default:
+		return false
+	}
 }
