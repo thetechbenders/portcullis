@@ -2,6 +2,7 @@ package enforce
 
 import (
 	"encoding/json"
+	"strings"
 	"errors"
 	"testing"
 )
@@ -95,5 +96,41 @@ func TestVerifyDenyGuardRejectsMalformed(t *testing.T) {
 		if err := VerifyDenyGuardJSON([]byte(input), "guest0"); !errors.Is(err, ErrGuardAttestation) {
 			t.Fatalf("accepted %q: %v", input, err)
 		}
+	}
+}
+
+func TestDenyAttestationRejectsAmbiguousAndMalformedFields(t *testing.T) {
+	good, err := json.Marshal(fixtureListing())
+	if err != nil {
+		t.Fatal(err)
+	}
+	replace := func(old, new string) string {
+		t.Helper()
+		s := string(good)
+		if !strings.Contains(s, old) {
+			t.Fatalf("fixture missing %q", old)
+		}
+		return strings.Replace(s, old, new, 1)
+	}
+	cases := map[string]string{
+		"duplicate root":        replace(`"nftables":`, `"nftables":[],"nftables":`),
+		"duplicate object kind": replace(`"table":{`, `"table":{},"table":{`),
+		"duplicate rule comment": replace(`"comment":"guest-egress"`, `"comment":"bogus","comment":"guest-egress"`),
+		"duplicate nested match": replace(`"op":"=="`, `"op":"!=","op":"=="`),
+		"top-level extra":      strings.TrimSuffix(string(good), "}") + `,"other":42}`,
+		"empty metainfo":       replace(`"metainfo":{"version":"1.0.9"}`, `"metainfo":null`),
+		"null table flags":     replace(`"name":"portcullis_guard"}`, `"name":"portcullis_guard","flags":null}`),
+		"unknown table field": replace(`"name":"portcullis_guard"}`, `"name":"portcullis_guard","flags_extra":["dormant"]}`),
+		"missing chain family": replace(`"chain":{"family":"inet",`, `"chain":{`),
+		"counter fractional": replace(`"packets":0`, `"packets":0.5`),
+		"counter negative":    replace(`"bytes":0`, `"bytes":-1`),
+		"verdict payload":     replace(`"drop":null`, `"drop":{"unexpected":true}`),
+	}
+	for name, input := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := VerifyDenyGuardJSON([]byte(input), "guest0"); !errors.Is(err, ErrGuardAttestation) {
+				t.Fatalf("malformed deny guard accepted: %v", err)
+			}
+		})
 	}
 }
