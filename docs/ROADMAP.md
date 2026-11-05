@@ -1,7 +1,7 @@
 # Portcullis roadmap
 
 **Planning baseline:** November 5, 2026.  
-**Code baseline:** \`main\` merge commit [\`ebe1aa5\`](https://github.com/thetechbenders/portcullis/commit/ebe1aa5ddb75c778b445b9bfd44384d2f0576b10).  
+**Code baseline:** `main` merge commit [`ebe1aa5`](https://github.com/thetechbenders/portcullis/commit/ebe1aa5ddb75c778b445b9bfd44384d2f0576b10).  
 **Status:** Proposed roadmap of record, pending review/merge of this documentation change. No milestone or issue authorizes deployment, hardware changes, a release or a code merge.
 
 Portcullis is a security-first, self-hosted Linux guest authorization gateway. Its currently integrated implementation is a **disposable Formnext 2026 network-namespace demonstration**, not a ready-to-install hotspot or internet gateway. This plan separates finished demo code, outstanding demonstration acceptance, features already discussed in earlier design documents, and newly specified work required for a first physical deployment.
@@ -22,13 +22,13 @@ Priority describes *when a capability becomes necessary*, not a promise about de
 | Capability | Current state | Evidence and limitation |
 | --- | --- | --- |
 | Strict nftables deny guard, timed allow sets and readback | **Implemented; disposable kernel CI verified** | [Formnext design](formnext-design.md), [integration evidence](formnext-integration.md), [CI 42021197054](https://github.com/thetechbenders/portcullis/actions/runs/42021197054). Not a physical network guarantee. |
-| Controller, bounded grant/revoke, conntrack cleanup, failed-start isolation | **Implemented; disposable tests verified** | \`internal/controller\`, \`internal/gateway\`, \`tests/netns/e2e.sh\`. Kernel grant maximum remains 15 minutes; restarting revokes grants. |
-| Interface-bound DHCP and local DNS | **Implemented for the demo** | \`internal/dhcp\` advertises gateway DNS; \`internal/guestdns/responder.go\` handles only configured captive/demo zones, refuses external names and does not recurse. **Public DNS is not available after authorization.** |
-| Guest HTTP portal, state, and local operator dashboard | **Implemented; CI and headless Chrome checked** | \`internal/portal\`, \`portcullisctl\`; native browser/operator rehearsal on the target disposable VM is **not verified**. |
-| Disposable topology and kernel packet E2E | **Implemented, CI green** | \`demo/portcullis-lab.sh\`; no physical AP, managed switch, NAT or actual internet path. |
-| Boot-safe physical interface enable/recovery | **Requirement discussed, not implemented** | \`docs/architecture.md\` and issue #5 prescribe boot isolation; the namespace launcher currently owns link-up and forwarding, not a physical host provisioner. |
-| Trusted AP station identity | **Risk recognized, mechanism absent** | \`docs/formnext-design.md\`, issue #5; MAC+IP cloning on shared L2 still inherits authority. |
-| Production NAT and post-grant public DNS | **NAT topology discussed; both absent** | \`docs/architecture.md\` mentions NAT; \`docs/formnext-design.md\` intentionally excludes it. No post-grant resolver design was found. |
+| Controller, bounded grant/revoke, conntrack cleanup, failed-start isolation | **Implemented; disposable tests verified** | `internal/controller`, `internal/gateway`, `tests/netns/e2e.sh`. Kernel grant maximum remains 15 minutes; restarting revokes grants. |
+| Interface-bound DHCP and local DNS | **Implemented for the demo** | `internal/dhcp` advertises gateway DNS; `internal/guestdns/responder.go` handles only configured captive/demo zones, refuses external names and does not recurse. **Public DNS is not available after authorization.** |
+| Guest HTTP portal, state, and local operator dashboard | **Implemented; CI and headless Chrome checked** | `internal/portal`, `portcullisctl`; native browser/operator rehearsal on the target disposable VM is **not verified**. |
+| Disposable topology and kernel packet E2E | **Implemented, CI green** | `demo/portcullis-lab.sh`; no physical AP, managed switch, NAT or actual internet path. |
+| Boot-safe physical interface enable/recovery | **Requirement discussed, not implemented** | `docs/architecture.md` and issue #5 prescribe boot isolation; the namespace launcher currently owns link-up and forwarding, not a physical host provisioner. |
+| Trusted AP station identity | **Risk recognized, mechanism absent** | `docs/formnext-design.md`, issue #5; MAC+IP cloning on shared L2 still inherits authority. |
+| Production NAT and post-grant public DNS | **NAT topology discussed; both absent** | `docs/architecture.md` mentions NAT; `docs/formnext-design.md` intentionally excludes it. No post-grant resolver design was found. |
 | Persistent operations, packages, safe policy upgrades | **Partial intentions, no deployable contract** | Early architecture mentions events; current diagnostics are demo-scoped. No version-aware guard migration or published supported ARM64 installer. |
 
 Historical phase documents and original handoffs preserve their design-time claims and may describe components as “planned” even when the merged demo has since implemented them. Use this document for **planning state**, the current source tree and CI for **implementation evidence**, and the runbook for **demo procedure**.
@@ -40,7 +40,7 @@ Historical phase documents and original handoffs preserve their design-time clai
 **Implemented:** merged PR #8, kernel grant/deny tests, browser HTTP/CSRF checks, headless Chrome denied-page render, operator revoke/reset, kernel expiry, fail-start mutation tests, namespace launcher lifecycle and offline fallback documentation.
 
 **Still to demonstrate, not presumed complete:**
-- [ ] On the **actual disposable Formnext VM**, test native Chromium and Firefox with normal \`portal.localhost\` resolution, guest request/release and destination access before/during/after grants.
+- [ ] On the **actual disposable Formnext VM**, test native Chromium and Firefox with normal `portal.localhost` resolution, guest request/release and destination access before/during/after grants.
 - [ ] Rehearse dashboard revoke/reset and kernel-set readback, SIGKILL followed by kernel-only expiry, restart and full teardown. Capture an operator-readable result and a fallback recording.
 - [ ] Check legacy iptables and nft-visible conflicting rules, verify the appropriate isolation/attestation state, and preserve management access. Make changes only in that disposable environment.
 - [ ] Record release candidate, matching CI artifact/commit, independent review disposition, teardown result and demo limitations before the November 14 freeze.
