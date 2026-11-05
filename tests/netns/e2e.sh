@@ -253,7 +253,7 @@ curl --noproxy '*' --silent --show-error --fail-with-body --max-time 8 \
   -H "Authorization: Bearer $token" \
   -H 'Origin: http://127.0.0.1:8788' \
   -H 'X-Portcullis-Request: 1' -H 'Content-Type: application/json' \
-  -d "{\\"mac\\":\\"$mac_a\\"}" \
+  -d '{"mac":"'"$mac_a"'"}' \
   "http://127.0.0.1:8788/api/revoke" > "$state/dashboard-revoke.json"
 python3 - "$state/dashboard-revoke.json" <<'PY'
 import json,sys
