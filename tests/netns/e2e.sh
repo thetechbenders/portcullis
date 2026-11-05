@@ -205,13 +205,21 @@ browser "http://portal.localhost/" | grep -q 'Portcullis' || die 'portal browser
 # Headless Chrome runs only on the disposable runner. This verifies
 # actual browser JS and the guest's accepted HTTP authority, not merely curl.
 command -v google-chrome >/dev/null || die 'Chrome required for browser acceptance'
-timeout 30s google-chrome --headless --no-sandbox --disable-gpu \
+# The wall-clock deadline includes cold browser startup on the shared runner;
+# --virtual-time-budget below only budgets page execution after startup.
+# Desktop D-Bus errors can also occur on successful runs: retain the actual
+# process status and elapsed time instead of attributing every failure to HTTP.
+chrome_started=$SECONDS
+chrome_rc=0
+timeout --kill-after=5s 90s google-chrome --headless --no-sandbox --disable-gpu \
   --disable-dev-shm-usage --disable-background-networking --no-proxy-server \
   --no-first-run --no-default-browser-check --user-data-dir="$state/chrome-guest" \
   --host-resolver-rules='MAP portal.localhost 127.0.0.1' \
   --virtual-time-budget=5000 --dump-dom "http://portal.localhost/" \
   > "$state/chrome-guest.html" 2> "$state/chrome-guest.log" \
-  || die 'headless Chrome could not load the guest portal'
+  || chrome_rc=$?
+echo "Chrome portal render: exit=$chrome_rc elapsed=$((SECONDS - chrome_started))s (wall limit 90s)"
+(( chrome_rc == 0 )) || die "headless Chrome failed (exit=$chrome_rc; 124 means wall-clock timeout)"
 grep -q 'Get online' "$state/chrome-guest.html" \
   || die 'real browser did not render the denied-state portal'
 if grep -q 'class="no-js"' "$state/chrome-guest.html"; then
