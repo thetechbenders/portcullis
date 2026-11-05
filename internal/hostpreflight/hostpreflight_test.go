@@ -95,8 +95,17 @@ func TestPhysicalPreflightHazards(t *testing.T) {
 		{"guest MAC modified", "guest_mac_not_permanent", func(s *Snapshot, _ *Selection) { s.Interfaces[1].MACAssignType = intPtr(3) }},
 		{"virtual guest NIC", "virtual_guest_interface", func(s *Snapshot, _ *Selection) { s.Interfaces[1].SysfsPath = "/sys/devices/virtual/net/usb0" }},
 		{"uplink overlaps management", "management_uplink_overlap", func(s *Snapshot, _ *Selection) { s.Interfaces[0].Addresses = []string{"192.168.1.50/24"} }},
-		{"default route through management", "default_route_not_uplink", func(s *Snapshot, _ *Selection) {
-			s.Routes = []Route{{Family: "ipv4", Interface: "wlan0", Default: true}}
+		{"unexpected active NIC", "unexpected_active_interface", func(s *Snapshot, _ *Selection) {
+			s.Interfaces = append(s.Interfaces, Interface{Name: "eth9", Up: true})
+		}},
+		{"guest per-link IPv4 forwarding", "interface_ipv4_forwarding", func(s *Snapshot, _ *Selection) {
+			s.Interfaces[1].IPv4Forwarding = boolPtr(true)
+		}},
+		{"uplink per-link IPv6 forwarding", "interface_ipv6_forwarding", func(s *Snapshot, _ *Selection) {
+			s.Interfaces[0].IPv6Forwarding = boolPtr(true)
+		}},
+		{"IPv6 force forwarding", "interface_ipv6_force_forwarding", func(s *Snapshot, _ *Selection) {
+			s.Interfaces[2].IPv6ForceForwarding = boolPtr(true)
 		}},
 		{"guest has non-default route", "guest_route", func(s *Snapshot, _ *Selection) {
 			s.Routes = []Route{{Family: "ipv4", Interface: "usb0", Destination: "10.0.0.0/8"}}
@@ -163,5 +172,15 @@ func TestCollectorSmokeOnLinux(t *testing.T) {
 	r := Evaluate(s, Selection{})
 	if !slices.Contains(codes(r), "interfaces_not_selected") {
 		t.Fatal("an unselected real Linux host must report missing topology")
+	}
+}
+
+func TestPilotLinkLocalAndManagementDefaultAreNotHazards(t *testing.T) {
+	s, sel := fixture()
+	s.Interfaces[0].Addresses = append(s.Interfaces[0].Addresses, "fe80::2/64", "169.254.8.1/16")
+	s.Interfaces[2].Addresses = append(s.Interfaces[2].Addresses, "fe80::1/64", "169.254.9.1/16")
+	s.Routes = []Route{{Family: "ipv4", Interface: "wlan0", Destination: "0.0.0.0/0", Default: true}}
+	if got := codes(Evaluate(s, sel)); len(got) != 0 {
+		t.Fatalf("isolated-uplink pilot should have no observed hazards, got %v", got)
 	}
 }
