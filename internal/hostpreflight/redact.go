@@ -46,7 +46,11 @@ func RedactSnapshot(s Snapshot) Snapshot {
 }
 
 func RedactReport(r Report) Report {
-	r.BootID = ""
+	if r.BootID != "" {
+		// Stable within a boot for comparing reports; deliberately pseudonymous.
+		digest := sha256.Sum256([]byte(r.BootID))
+		r.BootID = fmt.Sprintf("sha256:%x", digest[:12])
+	}
 	r.Selection.Guest = redactInterfaceName(r.Selection.Guest)
 	r.Selection.Uplink = redactInterfaceName(r.Selection.Uplink)
 	r.Selection.Management = redactInterfaceName(r.Selection.Management)
