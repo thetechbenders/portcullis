@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	routeUp = 0x1
+	routeUp     = 0x1
 	routeReject = 0x200
 )
 
@@ -79,7 +79,7 @@ func ParseProcRoutes(family string, lines []string) ([]Route, error) {
 			out = append(out, Route{
 				Family: "ipv6", Interface: fields[9],
 				Destination: network.String(),
-				Default: dest.IsUnspecified() && plen == 0,
+				Default:     dest.IsUnspecified() && plen == 0,
 			})
 		default:
 			return nil, fmt.Errorf("unknown route family %q", family)
