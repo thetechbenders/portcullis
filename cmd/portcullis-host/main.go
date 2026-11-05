@@ -67,6 +67,10 @@ func run(args []string, out io.Writer, diag io.Writer, collect func() hostprefli
 	if !*private {
 		report.Selection.PinnedGuestMAC = ""
 		report.Selection.PinnedGuestSysfs = ""
+		report.Selection.PinnedUplinkMAC = ""
+		report.Selection.PinnedUplinkSysfs = ""
+		report.Selection.PinnedManagementMAC = ""
+		report.Selection.PinnedManagementSysfs = ""
 		report.BootID = ""
 	}
 	if err := encoder.Encode(report); err != nil {
