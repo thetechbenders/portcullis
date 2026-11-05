@@ -45,6 +45,9 @@ func ParsePlan(data []byte) (Selection, error) {
 	if len(data) == 0 || len(data) > maxPlanBytes {
 		return Selection{}, errors.New("host plan is missing or exceeds 8192 bytes")
 	}
+	if err := rejectDuplicateJSONKeys(data); err != nil {
+		return Selection{}, fmt.Errorf("invalid host plan: %w", err)
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	var p Plan
@@ -77,4 +80,63 @@ func ParsePlan(data []byte) (Selection, error) {
 		return Selection{}, errors.New("host plan requires a canonical sysfs device path under /sys/devices")
 	}
 	return sel, nil
+}
+
+
+// rejectDuplicateJSONKeys traverses the bounded manifest using JSON tokens,
+// including nested objects. encoding/json otherwise silently keeps the last
+// value of a repeated key, which makes operator plans ambiguous.
+func rejectDuplicateJSONKeys(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	var walk func() error
+	walk = func() error {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		delim, ok := tok.(json.Delim)
+		if !ok {
+			return nil
+		}
+		switch delim {
+		case '{':
+			seen := map[string]struct{}{}
+			for dec.More() {
+				keyToken, err := dec.Token()
+				if err != nil {
+					return err
+				}
+				key, ok := keyToken.(string)
+				if !ok {
+					return errors.New("expected JSON object key")
+				}
+				if _, exists := seen[key]; exists {
+					return fmt.Errorf("duplicate JSON key %q", key)
+				}
+				seen[key] = struct{}{}
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err := dec.Token()
+			return err
+		case '[':
+			for dec.More() {
+				if err := walk(); err != nil {
+					return err
+				}
+			}
+			_, err := dec.Token()
+			return err
+		default:
+			return errors.New("unexpected JSON delimiter")
+		}
+	}
+	if err := walk(); err != nil {
+		return err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return errors.New("trailing JSON content")
+	}
+	return nil
 }
