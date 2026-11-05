@@ -66,14 +66,14 @@ type Snapshot struct {
 // Selection is an *expected* topology supplied by an operator. No device is
 // automatically selected from a default route or interface enumeration.
 type Selection struct {
-	Guest            string `json:"guest,omitempty"`
-	Uplink           string `json:"uplink,omitempty"`
-	Management       string `json:"management,omitempty"`
-	PinnedGuestMAC   string `json:"pinned_guest_mac,omitempty"`
-	PinnedGuestSysfs string `json:"pinned_guest_sysfs,omitempty"`
-	PinnedUplinkMAC string `json:"pinned_uplink_mac,omitempty"`
-	PinnedUplinkSysfs string `json:"pinned_uplink_sysfs,omitempty"`
-	PinnedManagementMAC string `json:"pinned_management_mac,omitempty"`
+	Guest                 string `json:"guest,omitempty"`
+	Uplink                string `json:"uplink,omitempty"`
+	Management            string `json:"management,omitempty"`
+	PinnedGuestMAC        string `json:"pinned_guest_mac,omitempty"`
+	PinnedGuestSysfs      string `json:"pinned_guest_sysfs,omitempty"`
+	PinnedUplinkMAC       string `json:"pinned_uplink_mac,omitempty"`
+	PinnedUplinkSysfs     string `json:"pinned_uplink_sysfs,omitempty"`
+	PinnedManagementMAC   string `json:"pinned_management_mac,omitempty"`
 	PinnedManagementSysfs string `json:"pinned_management_sysfs,omitempty"`
 }
 
