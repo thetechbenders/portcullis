@@ -226,6 +226,98 @@ func TestStrayKernelElementsRemoved(t *testing.T) {
 	}
 }
 
+// observedStartupFailsafe signals each completed Engage call so the failed-
+// start retry test need not infer progress from arbitrary sleep durations.
+type observedStartupFailsafe struct {
+	base     *fakeFailsafe
+	attempts chan struct{}
+}
+
+func (f observedStartupFailsafe) Engage(ctx context.Context, reason string) error {
+	err := f.base.Engage(ctx, reason)
+	f.attempts <- struct{}{}
+	return err
+}
+
+func TestFailedStartupIsolationKeepsRetryingWithoutAuthority(t *testing.T) {
+	e := newEnv(t)
+	e.c.cfg.ReconcileInterval = 50 * time.Millisecond
+	attempts := make(chan struct{}, 16)
+	e.c.failsafe = observedStartupFailsafe{base: e.fs, attempts: attempts}
+	e.fs.fail(errInjected)
+	e.k.setFail("Attest", errInjected)
+	if err := e.c.Start(context.Background()); !errors.Is(err, ErrDegraded) {
+		t.Fatalf("Start unexpectedly succeeded: %v", err)
+	}
+	// Initial isolation failed. Readback has not confirmed isolation.
+	<-attempts
+	if r := e.operator(ipc.OpSnapshot, ""); !r.OK || r.Snapshot.Isolation != "unconfirmed" {
+		t.Fatalf("initial isolation: %+v", r)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- e.c.HoldFailedStart(ctx) }()
+	wait := func() {
+		t.Helper()
+		select {
+		case <-attempts:
+		case <-time.After(2 * time.Second):
+			t.Fatal("failed startup stopped attempting isolation")
+		}
+	}
+	assertIsolation := func(want string) {
+		t.Helper()
+		if r := e.operator(ipc.OpSnapshot, ""); !r.OK || r.Snapshot.Isolation != want {
+			t.Fatalf("isolation got %+v, want %s", r, want)
+		}
+	}
+
+	e.fs.fail(nil)
+	wait()
+	assertIsolation("confirmed")
+	e.fs.fail(errInjected) // previously confirmed link was reactivated
+	wait()
+	assertIsolation("unconfirmed")
+	e.fs.fail(nil)
+	wait()
+	assertIsolation("confirmed")
+
+	if err := e.c.Bind(context.Background(), model.Binding{MAC: macA, Addr: addrA, Expires: e.clk.Now().Add(time.Minute)}); !errors.Is(err, ErrDegraded) {
+		t.Fatalf("failed startup allowed binding: %v", err)
+	}
+	if r := e.guest(ipc.OpRequest, 60, addrA); r.OK || r.Error != ipc.ErrUnavailable {
+		t.Fatalf("failed startup allowed request: %+v", r)
+	}
+	if err := e.c.Start(context.Background()); !errors.Is(err, ErrNotStarted) {
+		t.Fatalf("failed startup retried Start: %v", err)
+	}
+	if e.k.count("Grant") != 0 {
+		t.Fatal("failed-start safety loop granted authority")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("failed-start loop shutdown: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("failed-start loop did not stop on cancellation")
+	}
+}
+
+func TestHoldFailedStartRejectsUnfailedController(t *testing.T) {
+	e := newEnv(t)
+	if err := e.c.HoldFailedStart(context.Background()); !errors.Is(err, ErrNotStarted) {
+		t.Fatalf("new controller accepted failed-start supervision: %v", err)
+	}
+	e.start()
+	if err := e.c.HoldFailedStart(context.Background()); !errors.Is(err, ErrNotStarted) {
+		t.Fatalf("running controller accepted failed-start supervision: %v", err)
+	}
+}
+
 func TestStartFailureRefusesEverything(t *testing.T) {
 	e := newEnv(t)
 	e.k.setFail("Attest", errInjected)

@@ -324,6 +324,41 @@ func (c *Controller) startLocked(ctx context.Context) ([]model.Binding, error) {
 	return adopt, nil
 }
 
+// HoldFailedStart keeps retrying verified guest-link isolation after Start
+// fails. Normal Run cannot execute in phaseFailed, and no DHCP or IPC service
+// may be started on this path. A successful retry does not recover authority;
+// only a new successful process startup may do that.
+//
+// The guarantee ends when ctx is canceled or the process exits. Link state
+// is only known at each readback, not continuously or against privileged root.
+func (c *Controller) HoldFailedStart(ctx context.Context) error {
+	c.mu.Lock()
+	failed := c.phase == phaseFailed && c.degraded
+	c.mu.Unlock()
+	if !failed {
+		return ErrNotStarted
+	}
+	t := time.NewTicker(c.cfg.ReconcileInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+			if ctx.Err() != nil {
+				return nil
+			}
+			c.mu.Lock()
+			if c.phase != phaseFailed || !c.degraded {
+				c.mu.Unlock()
+				return ErrNotStarted
+			}
+			c.engageIsolationLocked()
+			c.mu.Unlock()
+		}
+	}
+}
+
 // Run reconciles every ReconcileInterval until ctx is done. A degraded
 // controller keeps running, refuses all authority, and reasserts link isolation
 // every tick. This also catches links that become UP after initial isolation.

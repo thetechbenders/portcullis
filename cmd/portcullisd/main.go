@@ -141,8 +141,8 @@ func run(ctx context.Context, cfg *config.Config, k *gateway.Kernel, flows gatew
 	ctrl.SetBindings(server)
 	// Attestation, inherited-grant revocation and binding adoption all happen
 	// before any guest-facing or control socket exists.
-	if err := ctrl.Start(ctx); err != nil {
-		return fmt.Errorf("refusing to serve: %w", err)
+	if err := startController(ctx, ctrl, log); err != nil {
+		return err
 	}
 
 	dhcpConn, err := dhcp.ListenInterface(cfg.GuestInterface, 67)
@@ -213,6 +213,28 @@ func run(ctx context.Context, cfg *config.Config, k *gateway.Kernel, flows gatew
 	default:
 		return nil
 	}
+}
+
+// startupController permits testing the failed-start safety gate without
+// creating listeners or touching the host networking stack.
+type startupController interface {
+	Start(context.Context) error
+	HoldFailedStart(context.Context) error
+}
+
+// startController does not return successfully after a failed Start. Instead
+// it keeps the isolation retry loop alive without creating DHCP/IPC sockets or
+// a readiness marker. Only an external shutdown ends the failed-start process.
+func startController(ctx context.Context, ctrl startupController, log *slog.Logger) error {
+	if err := ctrl.Start(ctx); err != nil {
+		failure := fmt.Errorf("refusing to serve: %w", err)
+		log.Error("controller startup failed; guest authorization unavailable; retrying isolation until shutdown", "err", err)
+		if holdErr := ctrl.HoldFailedStart(ctx); holdErr != nil {
+			return errors.Join(failure, fmt.Errorf("failed-start isolation loop: %w", holdErr))
+		}
+		return failure
+	}
+	return nil
 }
 
 func usage() {

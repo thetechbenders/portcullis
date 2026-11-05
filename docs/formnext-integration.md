@@ -104,3 +104,20 @@ The Formnext controller now rejects disabled or omitted `failsafe_link_down` in 
 ## SEC-A: verified and repeatedly asserted degraded isolation
 
 The failsafe now reads back the guest interface's administrative `UP` flag after `ip link set dev guest0 down`; a successful command exit without a DOWN readback is treated as failure. While degraded, every reconciliation tick retries link isolation (including after a previous success, to catch a later re-UP), and the operator snapshot distinguishes `isolation: confirmed` from `unconfirmed`. The dashboard no longer claims generic "failing closed" when isolation is unconfirmed. The readback is a **point-in-time** verification, not a guarantee against a privileged actor changing the interface between ticks. This does not make an external switch or physical network safe to deploy, and does not address privileged root/tc bypasses.
+
+## Failed-start isolation review correction
+
+When controller startup fails after the mandatory failsafe is wired, the daemon
+now remains in a non-serving safety loop until canceled. The initial failed
+link-down or readback attempt is retried at the controller reconciliation
+interval, including after a successful readback, so a later guest-link
+reactivation is detected and re-isolated. No DHCP/IPC listeners, authorization
+or readiness marker are created on that path, and success of a link-down retry
+does **not** recover controller authority. The original startup failure remains
+reported when the safety loop terminates.
+
+A process exit, SIGKILL, or host failure ends these retries. Every verification
+is point-in-time and cannot resist a concurrent privileged actor. Failures
+before the controller/failsafe can be constructed remain outside this specific
+correction. The demo launcher may time out waiting for readiness during a
+failed start; its partial disposable lab must then be removed with `down`.
