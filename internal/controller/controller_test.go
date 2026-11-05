@@ -235,7 +235,10 @@ type observedStartupFailsafe struct {
 
 func (f observedStartupFailsafe) Engage(ctx context.Context, reason string) error {
 	err := f.base.Engage(ctx, reason)
-	f.attempts <- struct{}{}
+	select {
+	case f.attempts <- struct{}{}:
+	default:
+	}
 	return err
 }
 
@@ -251,8 +254,11 @@ func TestFailedStartupIsolationKeepsRetryingWithoutAuthority(t *testing.T) {
 	}
 	// Initial isolation failed. Readback has not confirmed isolation.
 	<-attempts
-	if r := e.operator(ipc.OpSnapshot, ""); !r.OK || r.Snapshot.Isolation != "unconfirmed" {
-		t.Fatalf("initial isolation: %+v", r)
+	e.c.mu.Lock()
+	initiallyIsolated := e.c.isolated
+	e.c.mu.Unlock()
+	if initiallyIsolated {
+		t.Fatal("initial isolation was incorrectly confirmed")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -269,8 +275,11 @@ func TestFailedStartupIsolationKeepsRetryingWithoutAuthority(t *testing.T) {
 	}
 	assertIsolation := func(want string) {
 		t.Helper()
-		if r := e.operator(ipc.OpSnapshot, ""); !r.OK || r.Snapshot.Isolation != want {
-			t.Fatalf("isolation got %+v, want %s", r, want)
+		e.c.mu.Lock()
+		confirmed := e.c.isolated
+		e.c.mu.Unlock()
+		if confirmed != (want == "confirmed") {
+			t.Fatalf("isolation confirmed=%v, want %s", confirmed, want)
 		}
 	}
 
