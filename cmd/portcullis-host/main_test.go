@@ -119,3 +119,24 @@ func TestMACEncodedInterfaceNamesRedacted(t *testing.T) {
 		t.Fatalf("MAC leaked through interface name: %s", out.String())
 	}
 }
+
+func TestInventoryRedactsMACNamesInErrorsAndRoutes(t *testing.T) {
+	snap := testSnapshot()
+	for _, name := range []string{"enx001122aabbcc", "wlx00e04c6a1b2c", "wwx112233445566"} {
+		snap.Interfaces = append(snap.Interfaces, hostpreflight.Interface{Name: name, Master: name, Uppers: []string{name}})
+		snap.Routes = append(snap.Routes, hostpreflight.Route{Family: "ipv4", Interface: name, Destination: "10.0.0.0/8"})
+		snap.InventoryError = append(snap.InventoryError, "cannot read /proc/sys/net/ipv4/conf/"+name+"/forwarding")
+	}
+	var out, diag bytes.Buffer
+	if code := run([]string{"inventory"}, &out, &diag, func() hostpreflight.Snapshot { return snap }); code != 0 {
+		t.Fatalf("inventory failed: %d %s", code, diag.String())
+	}
+	for _, secret := range []string{"001122aabbcc", "00e04c6a1b2c", "112233445566", "enx-redacted-", "/proc/sys/net/ipv4/conf/"} {
+		if strings.Contains(out.String(), secret) {
+			t.Fatalf("redacted inventory leaked %q: %s", secret, out.String())
+		}
+	}
+	if !strings.Contains(out.String(), "mac-interface-1") || !strings.Contains(out.String(), "mac-interface-2") {
+		t.Fatalf("missing report-local aliases: %s", out.String())
+	}
+}
