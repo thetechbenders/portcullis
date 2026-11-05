@@ -59,7 +59,7 @@ func TestInventoryDoesNotCreateAuthorityOrLeakPrivateIdentifiers(t *testing.T) {
 func TestCheckExitCodesAndMissingPlan(t *testing.T) {
 	dir := t.TempDir()
 	plan := filepath.Join(dir, "plan.json")
-	body := `{"schema_version":1,"selection":{"guest":"usb0","uplink":"eth0","management":"wlan0","pinned_guest_mac":"02:22:33:44:55:66","pinned_guest_sysfs":"/sys/devices/pci0000/usb0"}}`
+	body := `{"schema_version":1,"selection":{"guest":"usb0","uplink":"eth0","management":"wlan0","pinned_guest_mac":"02:22:33:44:55:66","pinned_guest_sysfs":"/sys/devices/pci0000/usb0","pinned_uplink_mac":"dc:a6:32:aa:bb:cc","pinned_uplink_sysfs":"/sys/devices/platform/soc/eth0","pinned_management_mac":"dc:a6:32:bb:cc:dd","pinned_management_sysfs":"/sys/devices/platform/soc/wlan0"}}`
 	if err := os.WriteFile(plan, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
