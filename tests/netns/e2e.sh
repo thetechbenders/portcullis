@@ -303,6 +303,30 @@ import json,sys
 assert json.load(open(sys.argv[1]))["ok"]
 PY
 [[ $(session_state "$ns_a") == denied ]] || die 'dashboard reset did not clear cooldown and grants'
+# Reset must also erase an ACTIVE kernel grant, not merely a revoked empty set.
+grant
+for setname in granted_v4 granted_dst_v4; do
+  gw nft -j list set inet portcullis_guard "$setname" | python3 -c \
+    'import json,sys; s=[o["set"] for o in json.load(sys.stdin)["nftables"] if "set" in o]; assert len(s)==1 and bool(s[0].get("elem")),s'
+done
+curl --noproxy '*' --silent --show-error --fail-with-body --max-time 8 \
+  -H "Authorization: Bearer $token" -H 'Origin: http://127.0.0.1:8788' \
+  -H 'X-Portcullis-Request: 1' -H 'Content-Type: application/json' -d '{}' \
+  http://127.0.0.1:8788/api/reset > "$state/dashboard-reset-live.json"
+python3 - "$state/dashboard-reset-live.json" <<'PY'
+import json,sys
+assert json.load(open(sys.argv[1]))["ok"]
+PY
+for setname in granted_v4 granted_dst_v4; do
+  gw nft -j list set inet portcullis_guard "$setname" | python3 -c \
+    'import json,sys; s=[o["set"] for o in json.load(sys.stdin)["nftables"] if "set" in o]; assert len(s)==1 and not s[0].get("elem"),s'
+done
+[[ $(session_state "$ns_a") == denied ]] || die 'dashboard reset left guest authorized'
+before=$(count guest-egress)
+blocked_code=$(curl --noproxy '*' --silent --show-error --max-time 8 \
+  --output "$state/dashboard-reset-blocked.html" --write-out '%{http_code}' "http://127.0.0.1:9081/")
+[[ $blocked_code == 504 ]] || die "HTTP reset left demo destination reachable: $blocked_code"
+(( $(count guest-egress) > before )) || die 'dashboard reset did not restore kernel egress drop'
 echo 'PASS: browser relay Host/Origin, real kernel grant, destination and error attribution'
 probe "$ns_wan" 198.18.0.2 "$ns_a" deny guest-egress
 # DNS isolation: real UDP replies, not an external resolver.
@@ -505,4 +529,40 @@ PY
  echo "PASS: $kind rejected at runtime and startup"
 }
 for kind in hook dormant missing vlan macvlan ipvlan; do mutation "$kind"; done
+# NEW-1: test the DNS direction boundary against real conntrack state.
+# The normal guest-originated DNS positive path was validated above.
+# Stop only the unprivileged portal so its UDP/53 socket can be re-created by
+# a compromised-portal simulation; the gateway nft guard remains installed.
+portal_pid="$(cat "$state/portal.pid")"
+stop_pid portal
+wait "$portal_pid" 2>/dev/null || true
+a python3 - "$state/dns-active-open.ready" <<'PY' &
+import pathlib,socket,sys
+with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
+    sock.bind(("10.203.0.100",5353))
+    sock.settimeout(5)
+    pathlib.Path(sys.argv[1]).touch()
+    data,remote=sock.recvfrom(128)
+    assert data==b"outbound-dns-probe",data
+    sock.sendto(b"reply",remote)
+PY
+responder_pid=$!
+wait_file "$state/dns-active-open.ready"
+before=$(count guest-input)
+gw setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs python3 - <<'PY'
+import socket
+with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
+    sock.bind(("10.203.0.1",53))
+    sock.settimeout(2)
+    sock.sendto(b"outbound-dns-probe",("10.203.0.100",5353))
+    try:
+        data,_=sock.recvfrom(128)
+    except socket.timeout:
+        pass
+    else:
+        raise AssertionError("portal-originated UDP reply escaped guest-input: "+repr(data))
+PY
+wait "$responder_pid" || die 'guest never received simulated portal-originated UDP request'
+(( $(count guest-input) > before )) || die 'no kernel guest-input drop for portal-originated DNS reply'
+echo 'PASS: guest-originated DNS works; simulated portal-originated UDP reply is denied'
 echo 'PASS: Formnext DHCP, portal, timed kernel grants, revoke, crash, restart, anti-spoof, LAN, IPv6, DNS and adversarial topology'

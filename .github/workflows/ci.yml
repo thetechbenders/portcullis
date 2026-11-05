@@ -77,12 +77,37 @@ jobs:
         run: sudo env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted bash tests/netns/e2e.sh "${{ runner.temp }}/formnext-bin"
       - name: Disposable demo launcher lifecycle
         run: |
+          set -euo pipefail
           trap 'sudo bash demo/portcullis-lab.sh down' EXIT
           sudo bash demo/portcullis-lab.sh up "${{ runner.temp }}/formnext-bin"
-          sudo bash demo/portcullis-lab.sh status
-          if sudo bash demo/portcullis-lab.sh restart; then
+          sudo bash demo/portcullis-lab.sh status > "${{ runner.temp }}/portcullis-demo.status"
+          sudo ip netns exec pcdemo-gw /run/portcullis-demo/bin/portcullisctl \
+            -config /run/portcullis-demo/portcullis.json snapshot | python3 -c \
+            'import json,sys; s=json.load(sys.stdin); assert s["ok"] and s["snapshot"]["enforcement"]=="ok",s'
+          controller_pid=$(sudo cat /run/portcullis-demo/portcullisd.pid)
+          sudo sh -c 'kill -0 "$1"' sh "$controller_pid"
+          if sudo bash demo/portcullis-lab.sh restart > "${{ runner.temp }}/restart-refusal.log" 2>&1; then
             echo "danger: live-controller restart succeeded" >&2
             exit 1
           fi
+          grep -q 'controller is already running' "${{ runner.temp }}/restart-refusal.log"
+          sudo sh -c 'kill -0 "$1"' sh "$controller_pid"
+          sudo bash demo/portcullis-lab.sh status > /dev/null
+          tracked_pids=$(sudo sh -c 'cat /run/portcullis-demo/*.pid')
           sudo bash demo/portcullis-lab.sh down
+          test ! -e /run/portcullis-demo
+          if sudo ip netns list | grep -q '^pcdemo-'; then
+            echo "danger: demo namespaces survived teardown" >&2
+            exit 1
+          fi
+          for pid in $tracked_pids; do
+            for attempt in {1..30}; do
+              if ! ps -p "$pid" -o stat= | grep -qE '^[[:space:]]*[^Z[:space:]]'; then break; fi
+              sleep 0.1
+            done
+            if ps -p "$pid" -o stat= | grep -qE '^[[:space:]]*[^Z[:space:]]'; then
+              echo "danger: demo process $pid survived teardown" >&2
+              exit 1
+            fi
+          done
           trap - EXIT

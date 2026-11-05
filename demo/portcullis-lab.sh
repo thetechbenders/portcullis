@@ -191,9 +191,10 @@ EOF
 }
 
 cmd_status() {
-  ip netns exec $ns_gw "$state/bin/portcullisctl" -config "$state/portcullis.json" snapshot || :
+  ip netns exec $ns_gw "$state/bin/portcullisctl" -config "$state/portcullis.json" snapshot
   echo "--- kernel grant sets (authoritative) ---"
   ip netns exec $ns_gw nft list set inet portcullis_guard granted_v4
+  ip netns exec $ns_gw nft list set inet portcullis_guard granted_dst_v4
   ip netns exec $ns_gw nft list set inet portcullis_guard bound_v4
   echo "--- labelled rule counters ---"
   ip netns exec $ns_gw nft list table inet portcullis_guard | grep -E 'counter packets' || :
