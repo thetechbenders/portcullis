@@ -19,8 +19,8 @@ func testSnapshot() hostpreflight.Snapshot {
 		Interfaces: []hostpreflight.Interface{
 			{Name: "usb0", MAC: "02:22:33:44:55:66", SysfsPath: "/sys/devices/pci0000/usb0",
 				IPv6Disabled: &disabled, AcceptRA: &zero, MACAssignType: &zero},
-			{Name: "eth0", Up: true, Addresses: []string{"198.18.0.1/24"}},
-			{Name: "wlan0", Up: true, Addresses: []string{"192.168.1.119/24"}},
+			{Name: "eth0", Up: true, MAC: "dc:a6:32:aa:bb:cc", SysfsPath: "/sys/devices/platform/soc/eth0", Addresses: []string{"198.18.0.1/24"}},
+			{Name: "wlan0", Up: true, MAC: "dc:a6:32:bb:cc:dd", SysfsPath: "/sys/devices/platform/soc/wlan0", Addresses: []string{"192.168.1.119/24"}},
 		},
 		Routes: []hostpreflight.Route{{Family: "ipv4", Interface: "eth0", Destination: "0.0.0.0/0", Default: true}},
 	}
