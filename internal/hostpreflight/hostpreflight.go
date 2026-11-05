@@ -25,23 +25,23 @@ import (
 const SchemaVersion = 1
 
 type Interface struct {
-	Name          string   `json:"name"`
-	Index         int      `json:"index"`
-	MAC           string   `json:"mac,omitempty"`
-	SysfsPath     string   `json:"sysfs_path,omitempty"`
-	Driver        string   `json:"driver,omitempty"`
-	Master        string   `json:"master,omitempty"`
-	Uppers        []string `json:"uppers"`
-	Addresses     []string `json:"addresses"`
-	Up            bool     `json:"up"`
-	Loopback      bool     `json:"loopback"`
-	OperState     string   `json:"oper_state,omitempty"`
-	IPv6Disabled  *bool    `json:"ipv6_disabled,omitempty"`
-	AcceptRA      *int     `json:"accept_ra,omitempty"`
-	MACAssignType *int     `json:"mac_assign_type,omitempty"`
-	IPv4Forwarding *bool `json:"ipv4_forwarding,omitempty"`
-	IPv6Forwarding *bool `json:"ipv6_forwarding,omitempty"`
-	IPv6ForceForwarding *bool `json:"ipv6_force_forwarding,omitempty"`
+	Name                string   `json:"name"`
+	Index               int      `json:"index"`
+	MAC                 string   `json:"mac,omitempty"`
+	SysfsPath           string   `json:"sysfs_path,omitempty"`
+	Driver              string   `json:"driver,omitempty"`
+	Master              string   `json:"master,omitempty"`
+	Uppers              []string `json:"uppers"`
+	Addresses           []string `json:"addresses"`
+	Up                  bool     `json:"up"`
+	Loopback            bool     `json:"loopback"`
+	OperState           string   `json:"oper_state,omitempty"`
+	IPv6Disabled        *bool    `json:"ipv6_disabled,omitempty"`
+	AcceptRA            *int     `json:"accept_ra,omitempty"`
+	MACAssignType       *int     `json:"mac_assign_type,omitempty"`
+	IPv4Forwarding      *bool    `json:"ipv4_forwarding,omitempty"`
+	IPv6Forwarding      *bool    `json:"ipv6_forwarding,omitempty"`
+	IPv6ForceForwarding *bool    `json:"ipv6_force_forwarding,omitempty"`
 }
 
 type Route struct {
@@ -287,7 +287,10 @@ func Evaluate(s Snapshot, sel Selection) Report {
 			(nic.Up || len(nic.Addresses) > 0) {
 			add("unexpected_active_interface", "unplanned non-loopback interface "+nic.Name+" is active or addressed")
 		}
-		for _, state := range []struct { value *bool; code string }{
+		for _, state := range []struct {
+			value *bool
+			code  string
+		}{
 			{nic.IPv4Forwarding, "interface_ipv4_forwarding"},
 			{nic.IPv6Forwarding, "interface_ipv6_forwarding"},
 			{nic.IPv6ForceForwarding, "interface_ipv6_force_forwarding"},
@@ -404,7 +407,9 @@ func Evaluate(s Snapshot, sel Selection) Report {
 					add("invalid_uplink_address", "uplink address cannot be parsed")
 					continue
 				}
-				if a.Addr().IsLinkLocalUnicast() || b.Addr().IsLinkLocalUnicast() { continue }
+				if a.Addr().IsLinkLocalUnicast() || b.Addr().IsLinkLocalUnicast() {
+					continue
+				}
 				if a.Addr().Is4() == b.Addr().Is4() && a.Overlaps(b) {
 					add("management_uplink_overlap", "management and uplink address prefixes overlap")
 				}
