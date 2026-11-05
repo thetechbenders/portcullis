@@ -1,40 +1,37 @@
-# Read-only physical host preflight (experimental)
+# Pi 5 passive host inventory and topology check (experimental)
 
-**Status:** Unmerged implementation experiment for [P1 issue #10](https://github.com/thetechbenders/portcullis/issues/10). It is **not** a gateway installer, firewall attestor, physical readiness certificate, or permission to connect clients. Read the [proposed ownership ADR](https://github.com/thetechbenders/portcullis/pull/18) and [Formnext design contract](formnext-design.md).
+**Status:** Unmerged code in [PR #19](https://github.com/thetechbenders/portcullis/pull/19) for [issue #10](https://github.com/thetechbenders/portcullis/issues/10). **Neither command authorizes activating a guest interface.** See proposed [ownership ADR PR #18](https://github.com/thetechbenders/portcullis/pull/18).
 
-## What it does
+## Design: two non-mutating stages
 
-The standard-library-only `portcullis-host preflight` subcommand reads Linux kernel exposed interface and route metadata and evaluates an **operator-selected** topology. It performs **no privilege escalation**, does not invoke shell commands or subprocesses, does not write a file, and cannot start a service or configure networking.
+The standard-library-only `portcullis-host` binary performs no sudo, subprocesses, network writes, service installation, nftables changes or device activation.
 
-Evidence includes hostname, OS/architecture/kernel, interface names/indexes/MACs, canonical sysfs links, drivers (when exposed), interface addresses and administrative/operational state, master and upper devices, and IPv4/IPv6 default-route interface names. Metadata is from `net.Interfaces`, `/sys/class/net`, `/proc/net/route` and `/proc/net/ipv6_route`. Both route files have a bounded read (256 KiB each). An inaccessible or oversized source produces a visible blocker, not a fabricated empty inventory.
+1. **`inventory`** reads Linux kernel-facing evidence. It emits a timestamped observation, not a safety verdict. Zero exit means the visible inventory was collected without a reported read error. It does **not** mean networking is safe to expose.
+2. **`check -plan FILE`** compares that observation with an explicitly pinned, versioned operator plan. It emits `hazards[]`, `not_assessed[]`, `boot_id` (private mode), `observed_at` and a SHA-256 digest of the normalized plan. Exit **0** means no *observed* hazards; exit **1** means at least one was observed; exit **2** means invalid arguments or plan. None of these codes authorizes guest exposure. An independent privileged attestation and a separately reviewed activation design remain necessary.
 
-Evaluation reports observed hazards (guest interface UP, configured IPs, bridge/upper topology, an IP default route, missing or overlapping interface roles, mismatch with an operator-pinned MAC/sysfs path, management interface down/unaddressed), alongside explicit unresolved **structural** gates: independent guest isolation, systemd/NetworkManager ownership, actual nftables/legacy/tc/flowtable guard attestation, independent management recovery, and physical packet/reboot/crash testing.
+By default, both commands **redact sensitive observations**. `-private` includes actual hostname, MACs, addresses, device paths, and the boot ID. Even a shared redacted inventory can expose interface names, topology and kernel version, so inspect it before sharing. The assessment never includes raw packet contents, tokens, Wi-Fi passwords or SSH material. Keep unredacted reports out of Git history.
 
-**Every report returns `"status": "blocked"` and `"deployment_authorized": false`.** No command-line flag overrides this. Exit code **3** means deliberately blocked, including when no specific observed NIC hazard exists; exit 2 is invalid usage, exit 1 is output failure. Do not interpret exit code 3 as a malfunction or a security audit failure.
+## Safe usage
 
-## Build (safe, unprivileged)
-
-With Go 1.26 or newer, in an isolated worktree:
+From a separate worktree on Linux with Go 1.26 or newer:
 
 ```sh
 go test ./internal/hostpreflight ./cmd/portcullis-host
 go build -o /tmp/portcullis-host ./cmd/portcullis-host
+/tmp/portcullis-host inventory
+/tmp/portcullis-host inventory -private
 ```
 
-The binary can inspect the host without root privileges. Running it does **not** start `portcullisd` or apply any nftables policy.
-
-## Example: inventory without choosing roles
+To save **private** inventory, use `umask 077` and a directory not shared with the repository:
 
 ```sh
-/tmp/portcullis-host preflight > private-inventory.json
-echo "status=$?" # expected: 3
+umask 077
+/tmp/portcullis-host inventory -private > private-inventory.json
 ```
 
-This produces full observational evidence and blockers for unselected interfaces. Never commit this JSON, since it can contain real IP addresses, device paths and MACs. Use a private directory and `umask 077` if redirecting output.
+## Versioned operator plan
 
-## Versioned operator-pinned topology
-
-For repeatable evidence, store a private **plan**, not a live network configuration. A schema-valid plan still never authorizes deployment. These example identifiers are fictional and must not be used without checking the actual Pi.
+This example is **fictional**. First inspect your actual host; do not use these identifiers without independent verification. `pinned_guest_sysfs` is the canonical physical **parent device** path obtained from `/sys/class/net/IFACE/device`, not the unstable `/net/IFACE` child path. Virtual interfaces under `/sys/devices/virtual` are rejected.
 
 ```json
 {
@@ -49,31 +46,34 @@ For repeatable evidence, store a private **plan**, not a live network configurat
 }
 ```
 
-Run a passive comparison using `portcullis-host preflight -plan private-host-plan.json`. The parser limits input to 8192 bytes, rejects unknown fields, trailing data, invalid names, ambiguous roles, bad MACs and unclean non-sysfs identity paths. Combining `-plan` with individual role flags is prohibited. Nothing is applied to the network.
-
-## Example: operator-pinned *candidate* wired topology
-
-Do not copy these names or addresses blindly. First inspect the inventory to identify actual NICs and physical USB paths. The following values are **illustrative only**.
+Save it as `private-host-plan.json` with private file permissions and run:
 
 ```sh
-/tmp/portcullis-host preflight \
-  -guest usb0 \
-  -uplink eth0 \
-  -management wlan0 \
-  -pinned-guest-mac '02:22:33:44:55:66' \
-  -pinned-guest-sysfs '/sys/devices/pci0000/usb0'
+/tmp/portcullis-host check -plan private-host-plan.json
 ```
 
-This does **not** inspect or modify NetworkManager active-connection ownership; it reports that unresolved dependency as a blocker. It also does not prove an SSH session survives route changes, verify external physical cabling/port isolation, inspect every possible netfilter bypass, establish that the installed kernel guard matches Portcullis's expected schema, or probe any packet. The existing portal demo is *not* general internet access because post-grant DNS recursion and NAT are absent.
+The plan parser is bounded at 8 KiB, accepts only documented key spellings, rejects duplicate keys (including differently capitalized variants), unknown fields, trailing content, role collisions, invalid interface names, malformed/unicast-invalid MAC pins, virtual or noncanonical sysfs paths, symlinks, FIFOs and group/world-writable plan files. MACs are canonicalized before comparison.
 
-A real NIC may already have a link-local IPv6 address, may be administratively UP because its desktop network manager owns it, or may be represented by a different sysfs path after reconnect. These are reasons to **stop and investigate**, not to run commands to hide the evidence.
+The tool currently **does not** pin the uplink and management interfaces by physical parent identifiers, does not read the permanent hardware MAC through netlink, and cannot establish physical cabling or attachment provenance. A current MAC whose `addr_assign_type` is not permanent is flagged as a possible identity drift. These are gaps to close before host activation.
 
-## Safety, use and follow-up
+## Evidence gathered
 
-1. Review the proposed physical topology and independent guest exposure gate before choosing actual devices. Keep the Pi's `wlan0` management route under its existing owner and the USB guest port disconnected.
-2. Use this read-only output to inform a reviewable dry-run host adapter configuration. Compare across cold boot and dongle re-enumeration, but do not infer resilience from a single snapshot.
-3. Extend the evidence collector **in a separate reviewed change** to include bounded, redacted NetworkManager, systemd-networkd, nftables, iptables, tc/XDP and explicit version attestation. Merely finding the binaries or reading a table does not certify guard correctness.
-4. Test lifecycle and ownership state machines in disposable VMs, with positive-control packet probes and fault injection before any installation or physical-interface mutation.
-5. Hardware validation requires a separate approved, supervised plan with independent management and a physical disconnect path. Physical AP station identity and DNS/NAT remain separate issues.
+- Hostname, boot ID, UTC collection time, kernel release, OS and CPU architecture.
+- Interfaces, ifindex, current MAC, canonical parent sysfs path, available driver, UP/operstate, master/upper devices, address assignments, MAC assignment type and IPv6 disable/accept-RA sysctls.
+- IPv4 and IPv6 forwarding sysctls.
+- Kernel procfs visible IPv4/IPv6 routes, with parsing of flags and IPv6 reject/null routes. **IPv4 procfs shows only the main routing table; it is not a complete policy route/rule inventory.** The output explicitly lists these unassessed paths. Route observations are point-in-time, not an atomic kernel snapshot.
+- Read/parse errors are explicit findings; missing data is not interpreted as proof of isolation.
 
-The code intentionally has no installer, systemd units, network mutator, capability grants, automatic interface discovery-as-authorization, physical override switch, or network-level test invocation.
+`check` currently flags guest UP/loopback/addressed/enslaved or stacked-device state, virtual guest device identity, guest IPv6 and RA state, MAC assignment drift, malformed/mismatched pins, inactive management, role overlap, routes through guest, non-uplink default routes, enabled/unknown forwarding and overlapping management/uplink prefixes.
+
+**Observed hazards are separate from unassessed questions:** NetworkManager/systemd-networkd ownership, IPv4 policy routing tables and rules, exact nftables guard or bypass attestation, physical exposure isolation, recovery, cold boot, SIGKILL and packet-level acceptance. A check returning exit 0 with any `not_assessed[]` entries is useful inventory, **not a deployment approval**.
+
+## Integration and safety limits
+
+- Do not use the read-only tool to install `conntrack`, create systemd units, disable NetworkManager, rename a NIC, change routes or enable forwarding.
+- Do not connect a production guest segment or run gateway bootstrap just because `check` finds no observed hazards.
+- Read-only evidence can be compared after reboot or USB reconnect using `boot_id`, `observed_at`, plan digest and the private raw observations. If a NIC changes during a scan, the record may be inconsistent: re-run and investigate; no single inventory is atomic.
+- The Formnext disposable namespace demonstration is not a public-internet gateway. NAT and postauthorization DNS remain separate work.
+- Hardware acceptance requires a separate reviewed topology and supervised procedure preserving management SSH and a recovery path.
+
+For issues found by Claude's independent review, see the review handoff in PR #19 and the separately revised ADR.
