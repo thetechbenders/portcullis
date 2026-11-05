@@ -31,23 +31,23 @@ func VerifyDenyGuardJSON(data []byte, guest string) error {
 	if len(data) == 0 || len(data) > 1<<20 {
 		return fmt.Errorf("%w: missing or oversized ruleset", ErrGuardAttestation)
 	}
-	var document struct {
-		Nftables []json.RawMessage `json:"nftables"`
-	}
 	if err := rejectDuplicateGuardJSON(data); err != nil {
 		return fmt.Errorf("%w: invalid or ambiguous JSON: %v", ErrGuardAttestation, err)
 	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&document); err != nil {
+	// Go's struct decoder accepts case-insensitive and Unicode-folded field
+	// names. An exact-key map is required so alternate top-level spellings
+	// cannot replace a legitimate nftables listing.
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(data, &document); err != nil {
 		return fmt.Errorf("%w: decode: %v", ErrGuardAttestation, err)
 	}
-	var trailing any
-	if err := dec.Decode(&trailing); err != io.EOF {
-		return fmt.Errorf("%w: trailing content", ErrGuardAttestation)
+	rawListing, ok := document["nftables"]
+	if len(document) != 1 || !ok {
+		return fmt.Errorf("%w: expected exactly one literal nftables key", ErrGuardAttestation)
 	}
-	if len(document.Nftables) == 0 {
-		return fmt.Errorf("%w: empty nftables listing", ErrGuardAttestation)
+	var listing []json.RawMessage
+	if err := json.Unmarshal(rawListing, &listing); err != nil || len(listing) == 0 {
+		return fmt.Errorf("%w: missing or malformed nftables listing", ErrGuardAttestation)
 	}
 	seenTable := false
 	chains := map[string]bool{}
@@ -61,7 +61,7 @@ func VerifyDenyGuardJSON(data []byte, guest string) error {
 		"guest-egress":  {"guest_forward", guest, "iifname"},
 		"guest-ingress": {"guest_forward", guest, "oifname"},
 	}
-	for _, raw := range document.Nftables {
+	for _, raw := range listing {
 		var entry map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &entry); err != nil || len(entry) != 1 {
 			return fmt.Errorf("%w: invalid listing element", ErrGuardAttestation)
