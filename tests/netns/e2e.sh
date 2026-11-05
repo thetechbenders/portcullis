@@ -277,6 +277,22 @@ import json,sys
 x=json.load(open(sys.argv[1])); assert x['snapshot']['enforcement']=='degraded',x
 PY
  ip -n "$ns_gw" -j link show guest0 | python3 -c 'import json,sys; assert "UP" not in json.load(sys.stdin)[0]["flags"]'
+ # SEC-A: after the first successful isolation, an out-of-band privileged
+ # actor may bring guest0 UP. The degraded controller must reassert DOWN on
+ # its next reconcile tick, not rely on the one-shot result.
+ if [[ $kind == hook ]]; then
+   ip -n "$ns_gw" link set guest0 up
+   ip -n "$ns_gw" -j link show guest0 | python3 -c 'import json,sys; assert "UP" in json.load(sys.stdin)[0]["flags"]'
+   down=0
+   for _ in {1..100}; do
+     if ip -n "$ns_gw" -j link show guest0 | python3 -c 'import json,sys; assert "UP" not in json.load(sys.stdin)[0]["flags"]' 2>/dev/null; then
+       down=1
+       break
+     fi
+     sleep .1
+   done
+   (( down == 1 )) || die 'degraded controller did not reassert guest link isolation after re-UP'
+ fi
  # With link down, no valid grant can be issued. Prove startup refuses too.
  stop_controller
  if gw "$state/bin/portcullisd" run -config "$state/portcullis.json"; then die "$kind startup accepted"; fi
