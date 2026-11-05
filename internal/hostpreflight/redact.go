@@ -7,16 +7,7 @@ import (
 	"strings"
 )
 
-var macInterfaceName = regexp.MustCompile(`(?i)^(?:en|wl|ww)x[0-9a-f]{12}package hostpreflight
-
-import (
-	"crypto/sha256"
-	"fmt"
-	"regexp"
-	"strings"
-)
-
-)
+var macInterfaceName = regexp.MustCompile(`(?i)^(?:en|wl|ww)x[0-9a-f]{12}$`)
 
 // A report-local mapping preserves joins without making hardware identifiers reversible.
 type interfaceRedactor struct {
