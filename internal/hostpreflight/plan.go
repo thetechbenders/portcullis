@@ -83,7 +83,7 @@ func ValidateSelection(sel Selection) (Selection, error) {
 	}
 	pins := []struct {
 		role string
-		mac *string
+		mac  *string
 		path string
 	}{
 		{"guest", &sel.PinnedGuestMAC, sel.PinnedGuestSysfs},
