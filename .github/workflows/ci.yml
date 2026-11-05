@@ -73,6 +73,27 @@ jobs:
           for cmd in portcullisd portcullis-portal portcullisctl; do
             go build -o "${{ runner.temp }}/formnext-bin/$cmd" "./cmd/$cmd"
           done
+      - name: Diagnose Chrome startup independently of the guest network
+        run: |
+          google-chrome --version
+          sudo python3 - <<'PYPROBE'
+          import os, pathlib, subprocess, tempfile, time
+          with tempfile.TemporaryDirectory(prefix="portcullis-chrome-probe-") as tmp:
+              for variant in ("baseline", "no-desktop-bus"):
+                  env = os.environ.copy()
+                  if variant == "no-desktop-bus":
+                      env.update(DBUS_SESSION_BUS_ADDRESS="unix:path=/dev/null",
+                                 DBUS_SYSTEM_BUS_ADDRESS="unix:path=/dev/null")
+                  args = ["timeout", "60s", "google-chrome", "--headless", "--no-sandbox",
+                          "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking",
+                          "--no-proxy-server", "--no-first-run", "--no-default-browser-check",
+                          "--user-data-dir=" + tmp + "/" + variant,
+                          "--virtual-time-budget=5000", "--dump-dom", "about:blank"]
+                  start = time.monotonic()
+                  result = subprocess.run(args, env=env, capture_output=True, text=True)
+                  print(f"{variant}: rc={result.returncode}, elapsed={time.monotonic()-start:.2f}s", flush=True)
+                  print(result.stdout, result.stderr, flush=True)
+          PYPROBE
       - name: Formnext kernel end-to-end tests
         run: sudo env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted bash tests/netns/e2e.sh "${{ runner.temp }}/formnext-bin"
       - name: Disposable demo launcher lifecycle
