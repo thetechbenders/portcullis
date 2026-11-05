@@ -6,7 +6,9 @@ import "fmt"
 // paths that skip the inet forward hook the guard relies on: flowtables
 // (fast-path offload), any ingress/egress base chain in any family (nft
 // 1.0.9 JSON does not show a netdev chain's device, so all are rejected),
-// and dup/fwd statements, which emit packet copies outside the forward hook.
+// and dup/fwd/queue statements or xt targets, which can emit or redirect
+// packets outside the forward hook. Known xt match-only expressions are
+// permitted; extension targets are not.
 // A portcullis_guard table in another family, or a missing inet guard, also
 // fails. The guard's own objects in this same listing must pass the exact
 // guard verification, so both checks describe one consistent ruleset.
@@ -53,8 +55,8 @@ func VerifyNoBypass(ruleset []byte, c GuardConfig) error {
 				}
 			}
 		case "rule":
-			if containsKey(o.body["expr"], "dup", "fwd") {
-				return attestErr("dup/fwd statement present")
+			if unsafeBypassStatement(o.body["expr"]) {
+				return attestErr("packet duplication, queue, or xt target statement present")
 			}
 		}
 	}
@@ -69,22 +71,28 @@ func VerifyNoBypass(ruleset []byte, c GuardConfig) error {
 	return err
 }
 
-func containsKey(v any, keys ...string) bool {
+// unsafeBypassStatement examines all nested nft expression values. An xt
+// target can route packets outside Portcullis despite the normal nft hook.
+func unsafeBypassStatement(v any) bool {
 	switch x := v.(type) {
 	case map[string]any:
-		for k, w := range x {
-			for _, want := range keys {
-				if k == want {
+		for k, child := range x {
+			switch k {
+			case "dup", "fwd", "queue":
+				return true
+			case "xt":
+				x, ok := child.(map[string]any)
+				if !ok || x["type"] != "match" {
 					return true
 				}
 			}
-			if containsKey(w, keys...) {
+			if unsafeBypassStatement(child) {
 				return true
 			}
 		}
 	case []any:
-		for _, w := range x {
-			if containsKey(w, keys...) {
+		for _, child := range x {
+			if unsafeBypassStatement(child) {
 				return true
 			}
 		}

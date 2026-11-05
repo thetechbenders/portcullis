@@ -31,7 +31,7 @@ jobs:
         run: python3 -m unittest discover -s demo -p 'test_*.py' -v
       - name: Script syntax
         run: |
-          bash -n tests/netns/run.sh tests/netns/e2e.sh demo/portcullis-lab.sh
+          for f in tests/netns/run.sh tests/netns/e2e.sh demo/portcullis-lab.sh; do bash -n "$f"; done
           sh -n tests/netns/udhcpc.script
           python3 -m py_compile tests/netns/*.py demo/nsproxy.py
   netns:

@@ -34,6 +34,12 @@ func TestVerifyNoBypass(t *testing.T) {
 	if err := VerifyNoBypass(rulesetWith(t, otherTable, otherChain, otherRule), c); err != nil {
 		t.Fatalf("ordinary filter table rejected: %v", err)
 	}
+	// Ordinary compatibility matches do not copy or redirect traffic.
+	xtMatch := obj("rule", map[string]any{"family": "inet", "table": "other", "chain": "fw", "handle": jnum(9),
+		"expr": []any{map[string]any{"xt": map[string]any{"type": "match", "name": "tcp"}}}})
+	if err := VerifyNoBypass(rulesetWith(t, otherTable, otherChain, xtMatch), c); err != nil {
+		t.Fatalf("safe xt match rejected: %v", err)
+	}
 
 	doc, list := mutable(t)
 	i, _ := find(list, "rule", "comment", "guest-egress")
@@ -55,6 +61,12 @@ func TestVerifyNoBypass(t *testing.T) {
 		"guard name in ip family": rulesetWith(t, obj("table", map[string]any{"family": "ip", "name": GuardTable, "handle": jnum(5)})),
 		"dup statement": rulesetWith(t, otherTable, otherChain, obj("rule", map[string]any{"family": "inet", "table": "other",
 			"chain": "fw", "handle": jnum(2), "expr": []any{map[string]any{"dup": map[string]any{"addr": "198.18.0.2"}}}})),
+		"queue statement": rulesetWith(t, otherTable, otherChain, obj("rule", map[string]any{"family": "inet", "table": "other",
+			"chain": "fw", "handle": jnum(3), "expr": []any{map[string]any{"queue": map[string]any{"num": jnum(0)}}}})),
+		"xt target TEE": rulesetWith(t, otherTable, otherChain, obj("rule", map[string]any{"family": "inet", "table": "other",
+			"chain": "fw", "handle": jnum(4), "expr": []any{map[string]any{"xt": map[string]any{"type": "target", "name": "TEE"}}}})),
+		"xt missing type": rulesetWith(t, otherTable, otherChain, obj("rule", map[string]any{"family": "inet", "table": "other",
+			"chain": "fw", "handle": jnum(5), "expr": []any{map[string]any{"xt": map[string]any{"name": "TEE"}}}})),
 		"trailing data": append(rulesetWith(t), []byte(" []")...),
 	} {
 		if err := VerifyNoBypass(data, c); !errors.Is(err, ErrGuardAttestation) {

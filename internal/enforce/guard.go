@@ -179,6 +179,7 @@ func guardRules(c GuardConfig) []guardRule {
 	toGateway := guardTerm{text: "ip daddr " + c.GatewayV4.String(), expr: jmatch("==", jpayload("ip", "daddr"), c.GatewayV4.String())}
 	nfproto := guardTerm{text: "meta nfproto ipv4", expr: jmatch("==", jmeta("nfproto"), "ipv4")}
 	toGrantedDst := guardTerm{text: "ip daddr @" + SetGrantedDst, expr: jmatch("==", jpayload("ip", "daddr"), "@"+SetGrantedDst)}
+	original := guardTerm{text: "ct direction original", expr: jmatch("==", map[string]any{"ct": map[string]any{"key": "direction"}}, "original")}
 	reply := guardTerm{text: "ct direction reply", expr: jmatch("==", map[string]any{"ct": map[string]any{"key": "direction"}}, "reply")}
 	established := guardTerm{
 		text: "ct state established,related",
@@ -187,7 +188,7 @@ func guardRules(c GuardConfig) []guardRule {
 	return []guardRule{
 		{chainInput, "guest-dhcp", []guardTerm{guestIn, nfproto, termPort("udp", "sport", 68), termPort("udp", "dport", 67)}, "accept"},
 		{chainInput, "guest-dns", []guardTerm{guestIn, toGateway, termSourcePair(SetBound), termPort("udp", "dport", c.DNSPort)}, "accept"},
-		{chainInput, "guest-portal", []guardTerm{guestIn, toGateway, termSourcePair(SetBound), termPort("tcp", "dport", c.PortalPort)}, "accept"},
+		{chainInput, "guest-portal", []guardTerm{guestIn, toGateway, termSourcePair(SetBound), termPort("tcp", "dport", c.PortalPort), original}, "accept"},
 		{chainInput, "guest-input", []guardTerm{guestIn}, "drop"},
 		{chainForward, "guest-protected", []guardTerm{guestIn, termProtected(c.Protected)}, "drop"},
 		{chainForward, "grant-egress", []guardTerm{guestIn, upOut, termSourcePair(SetGranted)}, "accept"},

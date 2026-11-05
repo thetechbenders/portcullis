@@ -53,7 +53,7 @@ table inet portcullis_guard {
 		type filter hook input priority -50; policy accept;
 		iifname "guest0" meta nfproto ipv4 udp sport 68 udp dport 67 counter accept comment "guest-dhcp"
 		iifname "guest0" ip daddr 10.203.0.1 ip saddr . ether saddr @bound_v4 udp dport 53 counter accept comment "guest-dns"
-		iifname "guest0" ip daddr 10.203.0.1 ip saddr . ether saddr @bound_v4 tcp dport 80 counter accept comment "guest-portal"
+		iifname "guest0" ip daddr 10.203.0.1 ip saddr . ether saddr @bound_v4 tcp dport 80 ct direction original counter accept comment "guest-portal"
 		iifname "guest0" counter drop comment "guest-input"
 	}
 	chain guest_forward {
