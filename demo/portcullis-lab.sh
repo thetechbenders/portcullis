@@ -199,9 +199,25 @@ cmd_status() {
   ip netns exec $ns_gw nft list table inet portcullis_guard | grep -E 'counter packets' || :
 }
 
+cmd_restart() {
+  local pid
+  if [[ -f "$state/portcullisd.pid" ]]; then
+    pid="$(cat "$state/portcullisd.pid")"
+    if kill -0 "$pid" 2>/dev/null; then
+      die "controller is already running ($pid); restart requires a stopped/crashed controller"
+    fi
+    rm -f "$state/portcullisd.pid"
+  fi
+  start_controller
+  echo "controller restarted; inherited grants revoked"
+}
+
 cmd_down() {
-  local name ns
+  local name ns pid
   for name in proxy-portal proxy-demo dashboard demo-www portal portcullisd; do stop_pid "$name"; done
+  for ns in $ns_a $ns_b $ns_ap $ns_wan $ns_lan $ns_gw; do
+    for pid in $(ip netns pids "$ns" 2>/dev/null); do kill "$pid" 2>/dev/null || :; done
+  done
   for ns in $ns_a $ns_b $ns_ap $ns_wan $ns_lan $ns_gw; do ip netns del "$ns" 2>/dev/null || :; done
   rm -rf -- "$state"
   echo "lab removed"
@@ -216,7 +232,7 @@ case "${1:-}" in
   revoke) ip netns exec $ns_gw "$state/bin/portcullisctl" -config "$state/portcullis.json" revoke $mac_a ;;
   reset) ip netns exec $ns_gw "$state/bin/portcullisctl" -config "$state/portcullis.json" reset ;;
   crash) kill -9 "$(cat "$state/portcullisd.pid")" && rm -f "$state/portcullisd.pid" && echo "controller killed (SIGKILL)" ;;
-  restart) start_controller && echo "controller restarted; inherited grants revoked" ;;
+  restart) cmd_restart ;;
   down) cmd_down ;;
   *) sed -n '2,20p' "$0"; exit 2 ;;
 esac

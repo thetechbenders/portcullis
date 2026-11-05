@@ -75,3 +75,14 @@ jobs:
           done
       - name: Formnext kernel end-to-end tests
         run: sudo env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted bash tests/netns/e2e.sh "${{ runner.temp }}/formnext-bin"
+      - name: Disposable demo launcher lifecycle
+        run: |
+          trap 'sudo bash demo/portcullis-lab.sh down' EXIT
+          sudo bash demo/portcullis-lab.sh up "${{ runner.temp }}/formnext-bin"
+          sudo bash demo/portcullis-lab.sh status
+          if sudo bash demo/portcullis-lab.sh restart; then
+            echo "danger: live-controller restart succeeded" >&2
+            exit 1
+          fi
+          sudo bash demo/portcullis-lab.sh down
+          trap - EXIT

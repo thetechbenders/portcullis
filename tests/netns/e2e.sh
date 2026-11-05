@@ -113,12 +113,14 @@ cfg["failsafe_link_down"] = False
 with open(sys.argv[2], "w") as f:
     json.dump(cfg, f)
 PY
-if gw "$state/bin/portcullisd" bootstrap -config "$state/unsafe-no-failsafe.json"; then
-  die 'disabled failsafe accepted by bootstrap'
-fi
-if gw "$state/bin/portcullisd" run -config "$state/unsafe-no-failsafe.json"; then
-  die 'disabled failsafe accepted by controller run'
-fi
+unsafe_rc=0
+timeout 10s ip netns exec "$ns_gw" "$state/bin/portcullisd" bootstrap -config "$state/unsafe-no-failsafe.json" >"$state/unsafe-bootstrap.log" 2>&1 || unsafe_rc=$?
+(( unsafe_rc == 1 )) || die "disabled failsafe bootstrap returned $unsafe_rc, expected immediate refusal"
+grep -q 'failsafe_link_down must be true' "$state/unsafe-bootstrap.log" || die 'bootstrap rejected disabled failsafe for wrong reason'
+unsafe_rc=0
+timeout 10s ip netns exec "$ns_gw" "$state/bin/portcullisd" run -config "$state/unsafe-no-failsafe.json" >"$state/unsafe-run.log" 2>&1 || unsafe_rc=$?
+(( unsafe_rc == 1 )) || die "disabled failsafe controller returned $unsafe_rc, expected immediate refusal"
+grep -q 'failsafe_link_down must be true' "$state/unsafe-run.log" || die 'controller rejected disabled failsafe for wrong reason'
 # Temporary static fixture addresses prove every negative packet path before
 # installing the guard. DHCP replaces them below and is required to succeed.
 ip -n "$ns_a" addr add 10.203.0.100/24 dev eth0
@@ -256,6 +258,13 @@ for _ in {1..100}; do
 done
 (( dash_ready == 1 )) || die 'operator dashboard not serving'
 token=$(cat "$state/operator.token")
+bad_code=$(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --max-time 8 \
+  -H 'Authorization: Bearer invalid' http://127.0.0.1:8788/api/snapshot)
+[[ $bad_code == 401 ]] || die "dashboard accepted wrong bearer token: $bad_code"
+bad_code=$(curl --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' --max-time 8 \
+  -H "Authorization: Bearer $token" -H 'X-Portcullis-Request: 1' \
+  -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:8788/api/reset)
+[[ $bad_code == 403 ]] || die "dashboard accepted mutation with missing Origin: $bad_code"
 curl --noproxy '*' --silent --show-error --fail-with-body --max-time 8 \
   -H "Authorization: Bearer $token" "http://127.0.0.1:8788/api/snapshot" > "$state/dashboard-snapshot.json"
 python3 - "$state/dashboard-snapshot.json" <<'PY'
@@ -263,6 +272,7 @@ import json,sys
 x=json.load(open(sys.argv[1]))
 assert x["ok"] and x["snapshot"]["enforcement"]=="ok",x
 assert len(x["snapshot"]["grants"])==1 and x["snapshot"]["grants"][0]["kernel_present"],x
+assert x["snapshot"]["grants"][0]["kernel_remaining_seconds"] >= 15,x
 PY
 curl --noproxy '*' --silent --show-error --fail-with-body --max-time 8 \
   -H "Authorization: Bearer $token" \
@@ -280,8 +290,19 @@ code=$(curl --noproxy '*' --silent --show-error --max-time 8 \
   --output "$state/dashboard-revoked.html" --write-out '%{http_code}' "http://127.0.0.1:9081/")
 [[ $code == 504 ]] || die 'dashboard revoke left destination reachable'
 (( $(count guest-egress) > before )) || die 'dashboard revoke missing kernel drop'
-ctl reset > /dev/null
-[[ $(session_state "$ns_a") == denied ]] || die 'browser grant not removed'
+for setname in granted_v4 granted_dst_v4; do
+  gw nft -j list set inet portcullis_guard "$setname" | python3 -c \
+    'import json,sys; s=[o["set"] for o in json.load(sys.stdin)["nftables"] if "set" in o]; assert len(s)==1 and not s[0].get("elem"),s'
+done
+curl --noproxy '*' --silent --show-error --fail-with-body --max-time 8 \
+  -H "Authorization: Bearer $token" -H 'Origin: http://127.0.0.1:8788' \
+  -H 'X-Portcullis-Request: 1' -H 'Content-Type: application/json' -d '{}' \
+  http://127.0.0.1:8788/api/reset > "$state/dashboard-reset.json"
+python3 - "$state/dashboard-reset.json" <<'PY'
+import json,sys
+assert json.load(open(sys.argv[1]))["ok"]
+PY
+[[ $(session_state "$ns_a") == denied ]] || die 'dashboard reset did not clear cooldown and grants'
 echo 'PASS: browser relay Host/Origin, real kernel grant, destination and error attribution'
 probe "$ns_wan" 198.18.0.2 "$ns_a" deny guest-egress
 # DNS isolation: real UDP replies, not an external resolver.
@@ -296,6 +317,8 @@ for name,typ,rcode,answers in [('portal.portcullis.test',1,0,1),('example.org',1
 PY
 grant
 probe "$ns_wan" 198.18.0.2 "$ns_a" allow
+# A guest grant never permits unsolicited WAN traffic: require reply direction.
+probe "$ns_a" 10.203.0.100 "$ns_wan" deny guest-ingress
 probe "$ns_wan" 198.18.0.2 "$ns_b" deny guest-egress
 probe "$ns_lan" 10.204.0.2 "$ns_a" deny guest-protected
 probe "$ns_wan" 192.168.77.2 "$ns_a" deny guest-protected
@@ -395,6 +418,11 @@ import json,sys
 x=json.load(open(sys.argv[1])); assert x['snapshot']['enforcement']=='degraded',x
 PY
  ip -n "$ns_gw" -j link show guest0 | python3 -c 'import json,sys; assert "UP" not in json.load(sys.stdin)[0]["flags"]'
+ # Degraded isolation must clear both effective kernel grant sets as well.
+ for setname in granted_v4 granted_dst_v4; do
+   gw nft -j list set inet portcullis_guard "$setname" | python3 -c \
+     'import json,sys; s=[o["set"] for o in json.load(sys.stdin)["nftables"] if "set" in o]; assert len(s)==1 and not s[0].get("elem"),s'
+ done
  # SEC-A: after the first successful isolation, an out-of-band privileged
  # actor may bring guest0 UP. The degraded controller must reassert DOWN on
  # its next reconcile tick, not rely on the one-shot result.
