@@ -55,6 +55,8 @@ type Snapshot struct {
 	BootID          string      `json:"boot_id,omitempty"`
 	ObservedAt      string      `json:"observed_at"`
 	IPv4Forwarding  *bool       `json:"ipv4_forwarding,omitempty"`
+	IPv4DefaultForwarding *bool `json:"ipv4_default_forwarding,omitempty"`
+	IPv6DefaultForwarding *bool `json:"ipv6_default_forwarding,omitempty"`
 	IPv6Forwarding  *bool       `json:"ipv6_forwarding,omitempty"`
 	IPv6Unavailable bool        `json:"ipv6_unavailable,omitempty"`
 	Routes          []Route     `json:"routes"`
@@ -112,10 +114,12 @@ func Collect() Snapshot {
 		s.InventoryError = append(s.InventoryError, "boot id: "+err.Error())
 	}
 	s.IPv4Forwarding = readBoolSysctl("/proc/sys/net/ipv4/ip_forward", &s.InventoryError)
+	s.IPv4DefaultForwarding = readBoolSysctl("/proc/sys/net/ipv4/conf/default/forwarding", &s.InventoryError)
 	if _, err := os.Stat("/proc/sys/net/ipv6/conf/all/forwarding"); os.IsNotExist(err) {
 		s.IPv6Unavailable = true
 	} else {
 		s.IPv6Forwarding = readBoolSysctl("/proc/sys/net/ipv6/conf/all/forwarding", &s.InventoryError)
+		s.IPv6DefaultForwarding = readBoolSysctl("/proc/sys/net/ipv6/conf/default/forwarding", &s.InventoryError)
 	}
 	if name, err := os.Hostname(); err == nil {
 		s.Hostname = name
@@ -425,6 +429,12 @@ func Evaluate(s Snapshot, sel Selection) Report {
 			}
 			// Default management routes are not evidence of guest egress bypass.
 		}
+	}
+	if s.IPv4DefaultForwarding != nil && *s.IPv4DefaultForwarding {
+		add("ipv4_default_forwarding_enabled", "new interfaces would inherit IPv4 forwarding enabled")
+	}
+	if !s.IPv6Unavailable && s.IPv6DefaultForwarding != nil && *s.IPv6DefaultForwarding {
+		add("ipv6_default_forwarding_enabled", "new interfaces would inherit IPv6 forwarding enabled")
 	}
 	if s.IPv4Forwarding == nil || *s.IPv4Forwarding {
 		add("ipv4_forwarding_active_or_unknown", "IPv4 forwarding must be verified disabled before initial exposure")
