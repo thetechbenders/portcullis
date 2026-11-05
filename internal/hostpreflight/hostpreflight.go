@@ -7,6 +7,8 @@ package hostpreflight
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -78,13 +80,13 @@ type Finding struct {
 }
 
 type Report struct {
-	SchemaVersion        int       `json:"schema_version"`
-	ReadOnly             bool      `json:"read_only"`
-	DeploymentAuthorized bool      `json:"deployment_authorized"`
-	Status               string    `json:"status"`
-	Selection            Selection `json:"selection"`
-	Snapshot             Snapshot  `json:"snapshot"`
-	Findings             []Finding `json:"findings"`
+	SchemaVersion int `json:"schema_version"`
+	BootID string `json:"boot_id,omitempty"`
+	ObservedAt string `json:"observed_at"`
+	PlanSHA256 string `json:"plan_sha256"`
+	Selection Selection `json:"selection"`
+	Hazards []Finding `json:"hazards"`
+	NotAssessed []string `json:"not_assessed"`
 }
 
 // Collect inspects only kernel-exposed files and the standard library's
@@ -219,17 +221,24 @@ func readBoundedLines(path string, limit int64) ([]string, error) {
 	return out, sc.Err()
 }
 
-// Evaluate intentionally has no "ready"/"pass" result. Inventory evidence is
-// insufficient to attest the nftables guard, manager ownership, or an independent
-// physical guest exposure gate. Missing evidence is not proof of isolation.
+// Evaluate reports observed hazards separately from things this passive scan
+// cannot assess. A zero-hazard check is NOT a grant of deployment authority.
 func Evaluate(s Snapshot, sel Selection) Report {
+	data, _ := json.Marshal(sel)
+	digest := sha256.Sum256(data)
 	r := Report{
-		SchemaVersion: SchemaVersion, ReadOnly: true,
-		DeploymentAuthorized: false, Status: "blocked",
-		Selection: sel, Snapshot: s, Findings: []Finding{},
+		SchemaVersion: SchemaVersion, BootID: s.BootID, ObservedAt: s.ObservedAt,
+		PlanSHA256: fmt.Sprintf("%x", digest), Selection: sel,
+		Hazards: []Finding{}, NotAssessed: []string{
+			"IPv4 policy rules and non-main routing tables are not observed by procfs",
+			"NetworkManager/systemd-networkd and other interface ownership is unverified",
+			"nftables guard, legacy firewall, tc/XDP and bypass paths are not attested",
+			"independent guest exposure gate and physical recovery are unverified",
+			"reboot, SIGKILL, packet and physical acceptance have not run",
+		},
 	}
 	add := func(code, detail string) {
-		r.Findings = append(r.Findings, Finding{Code: code, Severity: "blocker", Detail: detail})
+		r.Hazards = append(r.Hazards, Finding{Code: code, Severity: "hazard", Detail: detail})
 	}
 	for _, err := range s.InventoryError {
 		add("inventory_incomplete", err)
@@ -340,13 +349,6 @@ func Evaluate(s Snapshot, sel Selection) Report {
 			}
 		}
 	}
-	// These cannot be inferred from the read-only evidence above, even if all
-	// observed NICs and route facts happen to look safe at the instant of scan.
-	add("manager_ownership_unverified", "NetworkManager, networkd and other live interface owners have not been independently attested")
-	add("kernel_guard_unverified", "persistent nftables guard, hooks, legacy rules and bypass paths have not been attested")
-	add("physical_gate_unverified", "no independent physically enforced guest isolation is verified")
-	add("recovery_unverified", "management reachability and physical recovery are not proven by an interface being UP")
-	add("physical_acceptance_outstanding", "no supervised packet, reboot, crash or power-loss acceptance has run on this topology")
 	return r
 }
 
