@@ -1,7 +1,9 @@
 package hostownership
 
 import (
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -17,10 +19,10 @@ func baseline() (Plan, Observation) {
 		ManagementPathPreserved: ptr(true), ManagementRoutePreserved: ptr(true), IsolatedUplinkPeer: ptr(true),
 		GuardAttested: ptr(true), GuardBlocksUnknownIngress: ptr(true), GuardBlocksGuestInput: ptr(true),
 		GuardBlocksGuestOutput: ptr(true), BypassPathsAttested: ptr(true), KernelTargetCompatible: ptr(true),
-		LocalRecoveryVerified: ptr(true), EvidenceFresh: ptr(true), BootID: "boot-test", PlanDigest: "plan-test", GuardDigest: "guard-test",
+		LocalRecoveryVerified: ptr(true), EvidenceFresh: ptr(true), BootID: "boot-test", GuardDigest: "guard-test",
 		GuestInterfaceGeneration: "netdev-instance-test",
 	}
-	o.Approval = &Approval{Valid: true, BootID: o.BootID, PlanDigest: o.PlanDigest, GuardDigest: o.GuardDigest, GuestInterfaceGeneration: o.GuestInterfaceGeneration}
+	o.Approval = &Approval{Valid: true, BootID: o.BootID, PlanDigest: PlanDigest(p), GuardDigest: o.GuardDigest, GuestInterfaceGeneration: o.GuestInterfaceGeneration}
 	return p, o
 }
 
@@ -69,8 +71,8 @@ func TestOneFaultNeverAuthorizes(t *testing.T) {
 		"replug new instance":       func(_ *Plan, o *Observation) { o.GuestInterfaceGeneration = "replug-2" },
 		"boot changed":              func(_ *Plan, o *Observation) { o.BootID = "different-boot" },
 		"guard changed":             func(_ *Plan, o *Observation) { o.GuardDigest = "new-guard" },
-		"plan changed":              func(_ *Plan, o *Observation) { o.PlanDigest = "new-plan" },
-		"expired approval":          func(_ *Plan, o *Observation) { o.Approval.Valid = false },
+		"plan changed":              func(p *Plan, _ *Observation) { p.UplinkName = "eth1" },
+		"approval invalidated":      func(_ *Plan, o *Observation) { o.Approval.Valid = false },
 		"missing approval":          func(_ *Plan, o *Observation) { o.Approval = nil },
 		"interface rename":          func(_ *Plan, o *Observation) { o.Guest.Name = "enx-renamed" },
 		"sysfs port move":           func(_ *Plan, o *Observation) { o.Guest.SysfsParent = "/sys/devices/other-port" },
@@ -83,7 +85,11 @@ func TestOneFaultNeverAuthorizes(t *testing.T) {
 		"invalid current mac":       func(_ *Plan, o *Observation) { o.Guest.CurrentMAC = "not-a-mac" },
 		"multicast permanent mac":   func(_ *Plan, o *Observation) { o.Guest.PermanentMAC = "01:00:5e:00:00:01" },
 		"zero permanent mac":        func(_ *Plan, o *Observation) { o.Guest.PermanentMAC = "00:00:00:00:00:00" },
-		"role collision":            func(p *Plan, _ *Observation) { p.UplinkName = p.ManagementName },
+		"uplink management collision": func(p *Plan, _ *Observation) { p.UplinkName = p.ManagementName },
+		"guest uplink collision":     func(p *Plan, _ *Observation) { p.UplinkName = p.Guest.Name },
+		"guest management collision": func(p *Plan, _ *Observation) { p.ManagementName = p.Guest.Name },
+		"empty uplink":               func(p *Plan, _ *Observation) { p.UplinkName = "" },
+		"empty management":           func(p *Plan, _ *Observation) { p.ManagementName = "" },
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -101,10 +107,12 @@ func TestOneFaultNeverAuthorizes(t *testing.T) {
 }
 
 func TestFaultReadbackNeverInventsIsolation(t *testing.T) {
-	for _, down := range []bool{false, true} {
-		s := OnFault(false, down)
-		if s.GuardAttested || s.AdminDownConfirmed != down || s.IsolationUnconfirmed == down || !s.ExistingKernelGrantsMayRemain {
-			t.Fatalf("incorrect crash-state evidence: %#v", s)
+	for _, guard := range []bool{false, true} {
+		for _, down := range []bool{false, true} {
+			s := OnFault(guard, down)
+			if s.GuardAttested != guard || s.AdminDownConfirmed != down || s.IsolationUnconfirmed == down || !s.ExistingKernelGrantsMayRemain {
+				t.Fatalf("incorrect crash-state evidence: %#v", s)
+			}
 		}
 	}
 }
@@ -116,5 +124,87 @@ func TestCandidateDoesNotMeanActive(t *testing.T) {
 	// DOWN beforehand; an already active guest cannot bootstrap this gate.
 	if Evaluate(p, o).MayRequestGuestUp {
 		t.Fatal("already-exposed guest must be rejected")
+	}
+}
+
+func TestApprovalBoundToEvaluatedPlan(t *testing.T) {
+	changes := map[string]func(*Plan){
+		"guest name": func(p *Plan) { p.Guest.Name = "usb-other" },
+		"guest sysfs": func(p *Plan) { p.Guest.SysfsParent = "/sys/devices/other-port" },
+		"guest permanent mac": func(p *Plan) { p.Guest.PermanentMAC = "02:aa:bb:cc:dd:ee" },
+		"guest current mac": func(p *Plan) { p.Guest.CurrentMAC = "02:aa:bb:cc:dd:ee" },
+		"guest driver": func(p *Plan) { p.Guest.Driver = "cdc_ncm" },
+		"guest usb vendor": func(p *Plan) { p.Guest.USBVendor = "ffff" },
+		"guest usb product": func(p *Plan) { p.Guest.USBProduct = "1234" },
+		"uplink": func(p *Plan) { p.UplinkName = "eth1" },
+		"management": func(p *Plan) { p.ManagementName = "wlan1" },
+	}
+	for name, change := range changes {
+		t.Run(name, func(t *testing.T) {
+			p, o := baseline()
+			original := o.Approval.PlanDigest
+			change(&p)
+			id := p.Guest
+			o.Guest = &id
+			if PlanDigest(p) == original {
+				t.Fatal("plan modification did not change digest")
+			}
+			got := Evaluate(p, o)
+			if got.MayRequestGuestUp || !slices.Contains(got.Reasons, "approval_unverified") {
+				t.Fatalf("changed plan retained authorization: %#v", got)
+			}
+			o.Approval.PlanDigest = PlanDigest(p)
+			if got := Evaluate(p, o); !got.MayRequestGuestUp {
+				t.Fatalf("matching new approval should be eligible in synthetic fixture: %#v", got)
+			}
+		})
+	}
+}
+
+func TestAllMissingBooleanEvidenceFailsClosed(t *testing.T) {
+	p, baselineObservation := baseline()
+	v := reflect.ValueOf(baselineObservation)
+	typeOf := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		field := typeOf.Field(i)
+		if field.Type != reflect.TypeOf((*bool)(nil)) {
+			continue
+		}
+		t.Run(field.Name, func(t *testing.T) {
+			o := baselineObservation
+			reflect.ValueOf(&o).Elem().Field(i).Set(reflect.Zero(field.Type))
+			got := Evaluate(p, o)
+			if got.MayRequestGuestUp || len(got.Reasons) == 0 {
+				t.Fatalf("missing %s evidence authorized: %#v", field.Name, got)
+			}
+		})
+	}
+}
+
+func TestEmptyAndWhitespaceApprovalBindingsFailClosed(t *testing.T) {
+	changes := map[string]func(*Observation){
+		"boot empty both sides": func(o *Observation) { o.BootID = ""; o.Approval.BootID = "" },
+		"boot whitespace both sides": func(o *Observation) { o.BootID = " "; o.Approval.BootID = " " },
+		"guard whitespace both sides": func(o *Observation) { o.GuardDigest = " "; o.Approval.GuardDigest = " " },
+		"generation whitespace both sides": func(o *Observation) { o.GuestInterfaceGeneration = " "; o.Approval.GuestInterfaceGeneration = " " },
+		"approval digest whitespace": func(o *Observation) { o.Approval.PlanDigest = " " },
+	}
+	for name, change := range changes {
+		t.Run(name, func(t *testing.T) {
+			p, o := baseline()
+			change(&o)
+			got := Evaluate(p, o)
+			if got.MayRequestGuestUp || !slices.Contains(got.Reasons, "approval_unverified") {
+				t.Fatalf("missing binding authorized: %#v", got)
+			}
+		})
+	}
+}
+
+func TestPlanDigestDeterministic(t *testing.T) {
+	p, _ := baseline()
+	first := PlanDigest(p)
+	if len(first) != 64 || first != PlanDigest(p) || strings.Trim(first, "0123456789abcdef") != "" {
+		t.Fatalf("unexpected canonical plan digest: %q", first)
 	}
 }
