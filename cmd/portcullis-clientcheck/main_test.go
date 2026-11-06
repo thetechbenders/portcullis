@@ -110,3 +110,46 @@ func TestDNSFailureDoesNotFallThroughToHTTP(t *testing.T) {
 		t.Fatalf("false success: %s", output.String())
 	}
 }
+
+
+func TestDirectGatewayDNSQuery(t *testing.T) {
+	server, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	responseDone := make(chan error, 1)
+	go func() {
+		packet := make([]byte, 512)
+		n, address, err := server.ReadFrom(packet)
+		if err != nil {
+			responseDone <- err
+			return
+		}
+		if n < 18 {
+			responseDone <- errors.New("short DNS question")
+			return
+		}
+		// Answer the exact incoming question. No system DNS or hosts file is used.
+		header := []byte{packet[0], packet[1], 0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0}
+		answer := []byte{0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 127, 0, 0, 1}
+		reply := append(append(header, packet[12:n]...), answer...)
+		_, err = server.WriteTo(reply, address)
+		responseDone <- err
+	}()
+	port := server.LocalAddr().(*net.UDPAddr).Port
+	o := testOptions(80)
+	o.dnsPort = uint16(port)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	ips, err := resolver(o)(ctx, o.host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ips) != 1 || ips[0].String() != "127.0.0.1" {
+		t.Fatalf("wrong answers: %v", ips)
+	}
+	if err := <-responseDone; err != nil {
+		t.Fatal(err)
+	}
+}
