@@ -29,6 +29,18 @@ umask 077
 /tmp/portcullis-host inventory -private > private-inventory.json
 ```
 
+## Bounded passive interface continuity watch
+
+`portcullis-host watch` extends the existing **read-only** pinned-plan check across a small, finite number of observations:
+
+```sh
+/tmp/portcullis-host watch -plan private-host-plan.json -samples 3 -interval 1s
+```
+
+The tool collects a new kernel-visible inventory at each sample, checks the same plan, and compares every interface's name, ifindex, current MAC and sysfs parent against the initial inventory. It stops at the first observed hazard. A new interface, vanished or renamed device, ifindex reuse, changed physical identity, missing boot ID, or observed guest exposure fails the watch. Each observation emits a separate JSON line containing its sample number and the existing hazard/not-assessed report. Output remains redacted unless `-private` is explicit. The sample count is 2–120 and the interval 100 ms–60 s; this is bounded diagnostics, not a resident service.
+
+Exit codes: **0** no *observed* hazards during samples, **1** hazard found, **2** invalid options or pinned plan, **3** output failure. A zero result is **not** permission to connect, raise, or activate any guest device. Polling cannot stop packets between samples or prevent a device from coming UP during boot/hotplug before it is observed. NetworkManager exclusion, independent default-DOWN exposure control, physical identity verification and management recovery remain required, separately designed deployment gates. **Do not use this watch as the independent physical safety interlock.**
+
 ## Versioned operator plan
 
 This example is **fictional**. First inspect your actual host; do not use these identifiers without independent verification. `pinned_guest_sysfs` is the canonical physical **parent device** path obtained from `/sys/class/net/IFACE/device`, not the unstable `/net/IFACE` child path. Virtual interfaces under `/sys/devices/virtual` are rejected.
