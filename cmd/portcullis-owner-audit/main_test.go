@@ -50,7 +50,11 @@ func TestAuditReadOnlyAndRedacted(t *testing.T) {
 		{"nmcli failed", "", sample, errors.New("profile password SECRET"), 1, "networkmanager_observation_unavailable"},
 		{"invalid nmcli", "GENERAL.NM-MANAGED:unknown\n", sample, nil, 1, "networkmanager_observation_unavailable"},
 		{"guest unexpectedly up", "GENERAL.NM-MANAGED:no\nGENERAL.AUTOCONNECT:no\nGENERAL.CONNECTION:--\n", func() hostpreflight.Snapshot { s := sample(); s.Interfaces[0].Up = true; return s }, nil, 1, "host_preflight_hazard"},
-		{"guest name stolen by another physical NIC", "GENERAL.NM-MANAGED:no\nGENERAL.AUTOCONNECT:no\nGENERAL.CONNECTION:--\n", func() hostpreflight.Snapshot { s := sample(); s.Interfaces[0].SysfsPath = "/sys/devices/pci0000/other"; return s }, nil, 1, "host_preflight_hazard"},
+		{"guest name stolen by another physical NIC", "GENERAL.NM-MANAGED:no\nGENERAL.AUTOCONNECT:no\nGENERAL.CONNECTION:--\n", func() hostpreflight.Snapshot {
+			s := sample()
+			s.Interfaces[0].SysfsPath = "/sys/devices/pci0000/other"
+			return s
+		}, nil, 1, "host_preflight_hazard"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var out, diag bytes.Buffer
