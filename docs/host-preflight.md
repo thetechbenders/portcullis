@@ -1,6 +1,6 @@
 # Pi 5 passive host inventory and topology check (experimental)
 
-**Status:** Read-only host preflight merged via [PR #19](https://github.com/thetechbenders/portcullis/pull/19) for [issue #10](https://github.com/thetechbenders/portcullis/issues/10). **Neither command authorizes activating a guest interface.** See proposed [ownership ADR PR #18](https://github.com/thetechbenders/portcullis/pull/18).
+**Status:** Read-only host preflight merged via [PR #19](https://github.com/thetechbenders/portcullis/pull/19) and hardened via [PR #20](https://github.com/thetechbenders/portcullis/pull/20), for [issue #10](https://github.com/thetechbenders/portcullis/issues/10). The proposed, not-yet-accepted ownership ADR was added via [PR #18](https://github.com/thetechbenders/portcullis/pull/18), its proposed non-executable contract via [PR #21](https://github.com/thetechbenders/portcullis/pull/21), and the separate non-deployable pure eligibility gate via [PR #22](https://github.com/thetechbenders/portcullis/pull/22). **None of these changes authorizes activating a guest interface.**
 
 ## Design: two non-mutating stages
 
@@ -80,4 +80,4 @@ The tool pins the current MAC and sysfs parent path for all three roles, but **d
 - The Formnext disposable namespace demonstration is not a public-internet gateway. NAT and postauthorization DNS remain separate work.
 - Hardware acceptance requires a separate reviewed topology and supervised procedure preserving management SSH and a recovery path.
 
-For issues found by Claude's independent review, see the review handoff in PR #19 and the separately revised ADR.
+For historical independent-review findings and remediation, see PR #19 and the ownership ADR in PR #18. The pure `internal/hostownership` policy gate introduced in PR #22 consumes evidence supplied by a future trusted adapter; it neither gathers permanent-MAC or guard evidence independently nor enforces interface DOWN state.

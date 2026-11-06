@@ -1,6 +1,6 @@
 # Phase 3: guard attestation before any privileged enforcement
 
-This branch begins Phase 3 with a deliberately **pure read-only verifier**. It consumes the JSON output of `nft -j list table inet portcullis_guard` but never executes `nft`, changes network state, or installs firewall rules.
+Phase 3 introduced a deliberately **pure read-only verifier**. It consumes the JSON output of `nft -j list table inet portcullis_guard` but never executes `nft`, changes network state, or installs firewall rules.
 
 ## Deny-only attestation contract
 
@@ -10,7 +10,7 @@ The intended chain topology is guest INPUT at priority -50, guest FORWARD at pri
 
 This is only a **snapshot validator for the known Phase 2 deny-only policy**. It does not attest to kernel execution paths, real physical interface identity, flowtables, bridge forwarding, host OUTPUT, tc/XDP, host firewalls, races between verification and use, or genuine client identity. A future privileged owner must prove those separately and must never continue if attestation fails.
 
-No controller is implemented or authorized to modify a live host. The next step is to validate against real nft-generated JSON **inside disposable netns CI**, then design an owner/attestation lifecycle including boot ordering, reload detection, privileged IPC, and rollback.
+**Historical scope:** this file describes the initial deny-only Phase 3 attestor, not the entire current repository. The later Formnext vertical slice includes a privileged controller exercised in disposable network namespaces; see [Formnext integration evidence](formnext-integration.md) and [the demo contract](formnext-design.md). Those tests do not establish physical Pi readiness. Persistent boot and host-manager ownership, reload and rename bypass handling, recovery, privileged physical activation, and real packet-path acceptance remain separate unverified requirements. No live-host modification is authorized by this document.
 
 ## Security-negative tests
 
