@@ -29,8 +29,13 @@ func TestClientCheck(t *testing.T) {
 	}{
 		{name: "recognized denied client", dns: "127.0.0.1", session: `{"ok":true,"session":{"state":"denied"}}`},
 		{name: "recognized granted client", dns: "127.0.0.1", session: `{"ok":true,"session":{"state":"granted"}}`},
+		{name: "recognized revoked client", dns: "127.0.0.1", session: `{"ok":true,"session":{"state":"revoked"}}`},
 		{name: "wrong dns", dns: "127.0.0.2", wantErr: "DNS A record"},
-		{name: "unrecognized client", dns: "127.0.0.1", session: `{"ok":false}`, wantErr: "recognized guest"},
+		{name: "unrecognized client", dns: "127.0.0.1", session: `{"ok":true,"session":{"state":"unrecognized"}}`, wantErr: "not a recognized guest"},
+		{name: "ambiguous client", dns: "127.0.0.1", session: `{"ok":true,"session":{"state":"ambiguous"}}`, wantErr: "not a recognized guest"},
+		{name: "unknown state", dns: "127.0.0.1", session: `{"ok":true,"session":{"state":"unanticipated"}}`, wantErr: "not a recognized guest"},
+		{name: "missing session", dns: "127.0.0.1", session: `{"ok":true}`, wantErr: "not a recognized guest"},
+		{name: "failed response", dns: "127.0.0.1", session: `{"ok":false,"session":{"state":"denied"}}`, wantErr: "recognized guest"},
 		{name: "bad session body", dns: "127.0.0.1", session: `not json`, wantErr: "session JSON invalid"},
 		{name: "session error", dns: "127.0.0.1", status: 403, wantErr: "session GET unexpected HTTP status"},
 	} {
