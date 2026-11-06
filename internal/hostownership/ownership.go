@@ -14,6 +14,8 @@ import (
 	"net"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // DeviceIdentity must be independently observed, never inferred solely from a
@@ -93,10 +95,32 @@ type Decision struct {
 	Reasons           []string
 }
 
+// validInterfaceName checks the Linux IFNAMSIZ limit and name restrictions.
+// A future privileged adapter must still verify the actual kernel interface.
+func validInterfaceName(name string) bool {
+	if !utf8.ValidString(name) || len(name) == 0 || len(name) > 15 || name == "." || name == ".." {
+		return false
+	}
+	for _, r := range name {
+		if r == '/' || r == ':' || unicode.IsSpace(r) || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
 // PlanDigest derives a versioned, domain-separated SHA-256 binding from every
-// current Plan field. The approval issuer must independently authenticate the
-// request and use this digest for the exact approved plan.
+// current Plan field. Invalid UTF-8 or Linux-invalid role names yield no digest.
+// The approval issuer must authenticate the exact approved plan independently.
 func PlanDigest(p Plan) string {
+	if !validInterfaceName(p.Guest.Name) || !validInterfaceName(p.UplinkName) || !validInterfaceName(p.ManagementName) {
+		return ""
+	}
+	for _, value := range []string{p.Guest.SysfsParent, p.Guest.CurrentMAC, p.Guest.PermanentMAC, p.Guest.Driver, p.Guest.USBVendor, p.Guest.USBProduct} {
+		if !utf8.ValidString(value) {
+			return ""
+		}
+	}
 	payload, err := json.Marshal(p)
 	if err != nil {
 		return ""
@@ -150,7 +174,7 @@ func sameIdentity(want DeviceIdentity, got *DeviceIdentity) bool {
 func Evaluate(p Plan, o Observation) Decision {
 	var reasons []string
 	fail := func(code string) { reasons = append(reasons, code) }
-	if strings.TrimSpace(p.Guest.Name) == "" || strings.TrimSpace(p.UplinkName) == "" || strings.TrimSpace(p.ManagementName) == "" ||
+	if !validInterfaceName(p.Guest.Name) || !validInterfaceName(p.UplinkName) || !validInterfaceName(p.ManagementName) ||
 		p.Guest.Name == p.UplinkName || p.Guest.Name == p.ManagementName || p.UplinkName == p.ManagementName {
 		fail("invalid_roles")
 	}

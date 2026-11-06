@@ -43,53 +43,48 @@ func TestDefaultFailsClosed(t *testing.T) {
 
 func TestOneFaultNeverAuthorizes(t *testing.T) {
 	cases := map[string]func(*Plan, *Observation){
-		"guest up":                    func(_ *Plan, o *Observation) { o.GuestAdministrativelyDown = ptr(false) },
-		"missing link readback":       func(_ *Plan, o *Observation) { o.GuestAdministrativelyDown = nil },
-		"ipv6 enabled":                func(_ *Plan, o *Observation) { o.GuestIPv6Disabled = ptr(false) },
-		"ra enabled":                  func(_ *Plan, o *Observation) { o.GuestAcceptRAZero = ptr(false) },
-		"ipv6 unknown after replug":   func(_ *Plan, o *Observation) { o.GuestIPv6Disabled = nil },
-		"guest cable connected":       func(_ *Plan, o *Observation) { o.GuestCarrier = ptr(true) },
-		"unknown cable state":         func(_ *Plan, o *Observation) { o.GuestCarrier = nil },
-		"unexpected address":          func(_ *Plan, o *Observation) { o.GuestHasAddresses = ptr(true) },
-		"unexpected route":            func(_ *Plan, o *Observation) { o.GuestHasRoutes = ptr(true) },
-		"bridge membership":           func(_ *Plan, o *Observation) { o.GuestEnslaved = ptr(true) },
-		"nm matcher miss":             func(_ *Plan, o *Observation) { o.ManagerMayActivate = ptr(true) },
-		"manager unknown":             func(_ *Plan, o *Observation) { o.ManagerMayActivate = nil },
-		"alternative manager":         func(_ *Plan, o *Observation) { o.CompetingManagerMayActivate = ptr(true) },
-		"management bounce":           func(_ *Plan, o *Observation) { o.ManagementPathPreserved = ptr(false) },
-		"management route lost":       func(_ *Plan, o *Observation) { o.ManagementRoutePreserved = ptr(false) },
-		"unverified peer":             func(_ *Plan, o *Observation) { o.IsolatedUplinkPeer = nil },
-		"guard removed":               func(_ *Plan, o *Observation) { o.GuardAttested = ptr(false) },
-		"rename hole":                 func(_ *Plan, o *Observation) { o.GuardBlocksUnknownIngress = ptr(false) },
-		"guest INPUT hole":            func(_ *Plan, o *Observation) { o.GuardBlocksGuestInput = ptr(false) },
-		"host OUTPUT hole":            func(_ *Plan, o *Observation) { o.GuardBlocksGuestOutput = ptr(false) },
-		"bypass unknown":              func(_ *Plan, o *Observation) { o.BypassPathsAttested = nil },
-		"kernel mismatch":             func(_ *Plan, o *Observation) { o.KernelTargetCompatible = ptr(false) },
-		"recovery missing":            func(_ *Plan, o *Observation) { o.LocalRecoveryVerified = ptr(false) },
-		"stale snapshot":              func(_ *Plan, o *Observation) { o.EvidenceFresh = ptr(false) },
-		"unknown freshness":           func(_ *Plan, o *Observation) { o.EvidenceFresh = nil },
-		"replug new instance":         func(_ *Plan, o *Observation) { o.GuestInterfaceGeneration = "replug-2" },
-		"boot changed":                func(_ *Plan, o *Observation) { o.BootID = "different-boot" },
-		"guard changed":               func(_ *Plan, o *Observation) { o.GuardDigest = "new-guard" },
-		"plan changed":                func(p *Plan, _ *Observation) { p.UplinkName = "eth1" },
-		"approval invalidated":        func(_ *Plan, o *Observation) { o.Approval.Valid = false },
-		"missing approval":            func(_ *Plan, o *Observation) { o.Approval = nil },
-		"interface rename":            func(_ *Plan, o *Observation) { o.Guest.Name = "enx-renamed" },
-		"sysfs port move":             func(_ *Plan, o *Observation) { o.Guest.SysfsParent = "/sys/devices/other-port" },
-		"driver rebind":               func(_ *Plan, o *Observation) { o.Guest.Driver = "cdc_ncm" },
-		"permanent mac mismatch":      func(_ *Plan, o *Observation) { o.Guest.PermanentMAC = "02:11:22:33:44:66" },
-		"current mac mismatch":        func(_ *Plan, o *Observation) { o.Guest.CurrentMAC = "02:11:22:33:44:66" },
-		"missing permanent mac":       func(_ *Plan, o *Observation) { o.Guest.PermanentMAC = "" },
-		"no driver":                   func(_ *Plan, o *Observation) { o.Guest.Driver = "" },
-		"wrong vid":                   func(_ *Plan, o *Observation) { o.Guest.USBVendor = "ffff" },
-		"invalid current mac":         func(_ *Plan, o *Observation) { o.Guest.CurrentMAC = "not-a-mac" },
-		"multicast permanent mac":     func(_ *Plan, o *Observation) { o.Guest.PermanentMAC = "01:00:5e:00:00:01" },
-		"zero permanent mac":          func(_ *Plan, o *Observation) { o.Guest.PermanentMAC = "00:00:00:00:00:00" },
-		"uplink management collision": func(p *Plan, _ *Observation) { p.UplinkName = p.ManagementName },
-		"guest uplink collision":      func(p *Plan, _ *Observation) { p.UplinkName = p.Guest.Name },
-		"guest management collision":  func(p *Plan, _ *Observation) { p.ManagementName = p.Guest.Name },
-		"empty uplink":                func(p *Plan, _ *Observation) { p.UplinkName = "" },
-		"empty management":            func(p *Plan, _ *Observation) { p.ManagementName = "" },
+		"guest up":                  func(_ *Plan, o *Observation) { o.GuestAdministrativelyDown = ptr(false) },
+		"missing link readback":     func(_ *Plan, o *Observation) { o.GuestAdministrativelyDown = nil },
+		"ipv6 enabled":              func(_ *Plan, o *Observation) { o.GuestIPv6Disabled = ptr(false) },
+		"ra enabled":                func(_ *Plan, o *Observation) { o.GuestAcceptRAZero = ptr(false) },
+		"ipv6 unknown after replug": func(_ *Plan, o *Observation) { o.GuestIPv6Disabled = nil },
+		"guest cable connected":     func(_ *Plan, o *Observation) { o.GuestCarrier = ptr(true) },
+		"unknown cable state":       func(_ *Plan, o *Observation) { o.GuestCarrier = nil },
+		"unexpected address":        func(_ *Plan, o *Observation) { o.GuestHasAddresses = ptr(true) },
+		"unexpected route":          func(_ *Plan, o *Observation) { o.GuestHasRoutes = ptr(true) },
+		"bridge membership":         func(_ *Plan, o *Observation) { o.GuestEnslaved = ptr(true) },
+		"nm matcher miss":           func(_ *Plan, o *Observation) { o.ManagerMayActivate = ptr(true) },
+		"manager unknown":           func(_ *Plan, o *Observation) { o.ManagerMayActivate = nil },
+		"alternative manager":       func(_ *Plan, o *Observation) { o.CompetingManagerMayActivate = ptr(true) },
+		"management bounce":         func(_ *Plan, o *Observation) { o.ManagementPathPreserved = ptr(false) },
+		"management route lost":     func(_ *Plan, o *Observation) { o.ManagementRoutePreserved = ptr(false) },
+		"unverified peer":           func(_ *Plan, o *Observation) { o.IsolatedUplinkPeer = nil },
+		"guard removed":             func(_ *Plan, o *Observation) { o.GuardAttested = ptr(false) },
+		"rename hole":               func(_ *Plan, o *Observation) { o.GuardBlocksUnknownIngress = ptr(false) },
+		"guest INPUT hole":          func(_ *Plan, o *Observation) { o.GuardBlocksGuestInput = ptr(false) },
+		"host OUTPUT hole":          func(_ *Plan, o *Observation) { o.GuardBlocksGuestOutput = ptr(false) },
+		"bypass unknown":            func(_ *Plan, o *Observation) { o.BypassPathsAttested = nil },
+		"kernel mismatch":           func(_ *Plan, o *Observation) { o.KernelTargetCompatible = ptr(false) },
+		"recovery missing":          func(_ *Plan, o *Observation) { o.LocalRecoveryVerified = ptr(false) },
+		"stale snapshot":            func(_ *Plan, o *Observation) { o.EvidenceFresh = ptr(false) },
+		"unknown freshness":         func(_ *Plan, o *Observation) { o.EvidenceFresh = nil },
+		"replug new instance":       func(_ *Plan, o *Observation) { o.GuestInterfaceGeneration = "replug-2" },
+		"boot changed":              func(_ *Plan, o *Observation) { o.BootID = "different-boot" },
+		"guard changed":             func(_ *Plan, o *Observation) { o.GuardDigest = "new-guard" },
+		"plan changed":              func(p *Plan, _ *Observation) { p.UplinkName = "eth1" },
+		"approval invalidated":      func(_ *Plan, o *Observation) { o.Approval.Valid = false },
+		"missing approval":          func(_ *Plan, o *Observation) { o.Approval = nil },
+		"interface rename":          func(_ *Plan, o *Observation) { o.Guest.Name = "enx-renamed" },
+		"sysfs port move":           func(_ *Plan, o *Observation) { o.Guest.SysfsParent = "/sys/devices/other-port" },
+		"driver rebind":             func(_ *Plan, o *Observation) { o.Guest.Driver = "cdc_ncm" },
+		"permanent mac mismatch":    func(_ *Plan, o *Observation) { o.Guest.PermanentMAC = "02:11:22:33:44:66" },
+		"current mac mismatch":      func(_ *Plan, o *Observation) { o.Guest.CurrentMAC = "02:11:22:33:44:66" },
+		"missing permanent mac":     func(_ *Plan, o *Observation) { o.Guest.PermanentMAC = "" },
+		"no driver":                 func(_ *Plan, o *Observation) { o.Guest.Driver = "" },
+		"wrong vid":                 func(_ *Plan, o *Observation) { o.Guest.USBVendor = "ffff" },
+		"invalid current mac":       func(_ *Plan, o *Observation) { o.Guest.CurrentMAC = "not-a-mac" },
+		"multicast permanent mac":   func(_ *Plan, o *Observation) { o.Guest.PermanentMAC = "01:00:5e:00:00:01" },
+		"zero permanent mac":        func(_ *Plan, o *Observation) { o.Guest.PermanentMAC = "00:00:00:00:00:00" },
 	}
 	for name, change := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -206,5 +201,67 @@ func TestPlanDigestDeterministic(t *testing.T) {
 	first := PlanDigest(p)
 	if len(first) != 64 || first != PlanDigest(p) || strings.Trim(first, "0123456789abcdef") != "" {
 		t.Fatalf("unexpected canonical plan digest: %q", first)
+	}
+}
+
+func TestInvalidRoleReasonsNotMaskedByApproval(t *testing.T) {
+	changes := map[string]func(*Plan){
+		"uplink management collision": func(p *Plan) { p.UplinkName = p.ManagementName },
+		"guest uplink collision":      func(p *Plan) { p.UplinkName = p.Guest.Name },
+		"guest management collision":  func(p *Plan) { p.ManagementName = p.Guest.Name },
+		"empty guest":                 func(p *Plan) { p.Guest.Name = "" },
+		"empty uplink":                func(p *Plan) { p.UplinkName = "" },
+		"empty management":            func(p *Plan) { p.ManagementName = "" },
+		"guest trailing whitespace":   func(p *Plan) { p.Guest.Name += " " },
+		"uplink trailing whitespace":  func(p *Plan) { p.UplinkName = p.Guest.Name + " " },
+		"non-UTF8 uplink":             func(p *Plan) { p.UplinkName = "eth\xff" },
+		"non-UTF8 management":         func(p *Plan) { p.ManagementName = "wlan\xfe" },
+		"colon in guest":              func(p *Plan) { p.Guest.Name = "bad:name" },
+		"slash in uplink":             func(p *Plan) { p.UplinkName = "bad/name" },
+		"too long":                    func(p *Plan) { p.UplinkName = "1234567890123456" },
+		"dot":                         func(p *Plan) { p.ManagementName = "." },
+	}
+	for name, change := range changes {
+		t.Run(name, func(t *testing.T) {
+			p, o := baseline()
+			change(&p)
+			id := p.Guest
+			o.Guest = &id
+			// Reissue the synthetic approval so a stale approval mismatch cannot
+			// mask a missing role validation check.
+			o.Approval.PlanDigest = PlanDigest(p)
+			got := Evaluate(p, o)
+			if got.MayRequestGuestUp || !slices.Contains(got.Reasons, "invalid_roles") {
+				t.Fatalf("invalid role accepted or wrong failure reason: %#v", got)
+			}
+		})
+	}
+}
+
+func TestMalformedPlanDigestNeverAuthorizes(t *testing.T) {
+	changes := map[string]func(*Plan){
+		"invalid UTF8 guest name":    func(p *Plan) { p.Guest.Name = "usb\xff" },
+		"invalid UTF8 sysfs":         func(p *Plan) { p.Guest.SysfsParent = "/sys/\xff" },
+		"invalid UTF8 driver":        func(p *Plan) { p.Guest.Driver = "r8152\xfe" },
+		"invalid UTF8 current MAC":   func(p *Plan) { p.Guest.CurrentMAC = "02:11:22:33:44:\xff" },
+		"invalid UTF8 permanent MAC": func(p *Plan) { p.Guest.PermanentMAC = "02:11:22:33:44:\xfe" },
+		"invalid UTF8 USB vendor":    func(p *Plan) { p.Guest.USBVendor = "0b\xff" },
+		"invalid UTF8 USB product":   func(p *Plan) { p.Guest.USBProduct = "81\xfe" },
+	}
+	for name, change := range changes {
+		t.Run(name, func(t *testing.T) {
+			p, o := baseline()
+			change(&p)
+			if got := PlanDigest(p); got != "" {
+				t.Fatalf("malformed plan received digest: %q", got)
+			}
+			id := p.Guest
+			o.Guest = &id
+			o.Approval.PlanDigest = ""
+			got := Evaluate(p, o)
+			if got.MayRequestGuestUp || !slices.Contains(got.Reasons, "approval_unverified") {
+				t.Fatalf("malformed plan authorized: %#v", got)
+			}
+		})
 	}
 }
