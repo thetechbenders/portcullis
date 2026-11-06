@@ -80,6 +80,9 @@ func TestOneFaultNeverAuthorizes(t *testing.T) {
 		"missing permanent mac":     func(_ *Plan, o *Observation) { o.Guest.PermanentMAC = "" },
 		"no driver":                 func(_ *Plan, o *Observation) { o.Guest.Driver = "" },
 		"wrong vid":                 func(_ *Plan, o *Observation) { o.Guest.USBVendor = "ffff" },
+		"invalid current mac":        func(_ *Plan, o *Observation) { o.Guest.CurrentMAC = "not-a-mac" },
+		"multicast permanent mac":   func(_ *Plan, o *Observation) { o.Guest.PermanentMAC = "01:00:5e:00:00:01" },
+		"zero permanent mac":        func(_ *Plan, o *Observation) { o.Guest.PermanentMAC = "00:00:00:00:00:00" },
 		"role collision":            func(p *Plan, _ *Observation) { p.UplinkName = p.ManagementName },
 	}
 	for name, change := range cases {
