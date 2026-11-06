@@ -16,7 +16,7 @@ import (
 
 func labGuard(t *testing.T) GuardConfig {
 	t.Helper()
-	c := GuardConfig{Guest: "guest0", Uplink: "uplink0", GatewayV4: netip.MustParseAddr("10.203.0.1"), PortalPort: 80, DNSPort: 53}
+	c := GuardConfig{Guest: "guest0", Uplink: "uplink0", GuestIfIndex: 17, GatewayV4: netip.MustParseAddr("10.203.0.1"), PortalPort: 80, DNSPort: 53}
 	for _, s := range config.DefaultProtectedV4 {
 		c.Protected = append(c.Protected, netip.MustParsePrefix(s))
 	}
@@ -51,21 +51,66 @@ table inet portcullis_guard {
 	}
 	chain guest_input {
 		type filter hook input priority -50; policy accept;
-		iifname "guest0" meta nfproto ipv4 udp sport 68 udp dport 67 counter accept comment "guest-dhcp"
-		iifname "guest0" ip daddr 10.203.0.1 ip saddr . ether saddr @bound_v4 udp dport 53 ct direction original counter accept comment "guest-dns"
-		iifname "guest0" ip daddr 10.203.0.1 ip saddr . ether saddr @bound_v4 tcp dport 80 ct direction original counter accept comment "guest-portal"
-		iifname "guest0" counter drop comment "guest-input"
+		iifname "guest0" iif 17 meta nfproto ipv4 udp sport 68 udp dport 67 counter accept comment "guest-dhcp"
+		iifname "guest0" iif 17 ip daddr 10.203.0.1 ip saddr . ether saddr @bound_v4 udp dport 53 ct direction original counter accept comment "guest-dns"
+		iifname "guest0" iif 17 ip daddr 10.203.0.1 ip saddr . ether saddr @bound_v4 tcp dport 80 ct direction original counter accept comment "guest-portal"
+		iif 17 counter drop comment "guest-input"
+		iifname "guest0" counter drop comment "guest-input-name"
 	}
 	chain guest_forward {
 		type filter hook forward priority -50; policy accept;
 		iifname "guest0" ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4 } counter drop comment "guest-protected"
-		iifname "guest0" oifname "uplink0" ip saddr . ether saddr @granted_v4 counter accept comment "grant-egress"
-		iifname "guest0" counter drop comment "guest-egress"
-		iifname "uplink0" oifname "guest0" ip daddr @granted_dst_v4 ct direction reply ct state established,related counter accept comment "grant-ingress"
-		oifname "guest0" counter drop comment "guest-ingress"
+		iifname "guest0" iif 17 oifname "uplink0" ip saddr . ether saddr @granted_v4 counter accept comment "grant-egress"
+		iif 17 counter drop comment "guest-egress"
+		iifname "guest0" counter drop comment "guest-egress-name"
+		iifname "uplink0" oifname "guest0" oif 17 ip daddr @granted_dst_v4 ct direction reply ct state established,related counter accept comment "grant-ingress"
+		oif 17 counter drop comment "guest-ingress"
+		oifname "guest0" counter drop comment "guest-ingress-name"
 	}
 }
 `
+
+// The final deny rules must remain bound to the same netdevice even after it
+// is renamed. Name-based allows intentionally fail when the name changes.
+func TestGuestDenyRulesPinKernelIndex(t *testing.T) {
+	c := labGuard(t)
+	got, err := RenderGuardBootstrap(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{
+		`iif 17 counter drop comment "guest-input"`,
+		`iif 17 counter drop comment "guest-egress"`,
+		`oif 17 counter drop comment "guest-ingress"`,
+	} {
+		if !strings.Contains(got, rule) {
+			t.Fatalf("missing index-pinned deny %q", rule)
+		}
+	}
+	for _, allowed := range []string{
+		`iifname "guest0" iif 17 meta nfproto`,
+		`iifname "guest0" iif 17 ip daddr`,
+		`iifname "guest0" iif 17 oifname "uplink0"`,
+		`iifname "uplink0" oifname "guest0" oif 17`,
+	} {
+		if !strings.Contains(got, allowed) {
+			t.Fatalf("guest authorization is not bound to both name and index: %q", allowed)
+		}
+	}
+	for _, namedDeny := range []string{
+		`iifname "guest0" counter drop comment "guest-input-name"`,
+		`iifname "guest0" counter drop comment "guest-egress-name"`,
+		`oifname "guest0" counter drop comment "guest-ingress-name"`,
+	} {
+		if !strings.Contains(got, namedDeny) {
+			t.Fatalf("missing complementary guest-name deny %q", namedDeny)
+		}
+	}
+	c.GuestIfIndex = 0
+	if out, err := RenderGuardBootstrap(c); !errors.Is(err, ErrGuardConfig) || out != "" {
+		t.Fatalf("accepted missing guest ifindex: %q %v", out, err)
+	}
+}
 
 func TestRenderGuardBootstrapGolden(t *testing.T) {
 	got, err := RenderGuardBootstrap(labGuard(t))
@@ -96,8 +141,8 @@ func TestBootstrapAndVerifierShareRuleSpec(t *testing.T) {
 		}
 	}
 	rules := guardRules(c)
-	wantOrder := []string{"guest-dhcp", "guest-dns", "guest-portal", "guest-input",
-		"guest-protected", "grant-egress", "guest-egress", "grant-ingress", "guest-ingress"}
+	wantOrder := []string{"guest-dhcp", "guest-dns", "guest-portal", "guest-input", "guest-input-name",
+		"guest-protected", "grant-egress", "guest-egress", "guest-egress-name", "grant-ingress", "guest-ingress", "guest-ingress-name"}
 	if len(rules) != len(wantOrder) || len(lines) != len(rules) {
 		t.Fatalf("rule count: spec %d rendered %d", len(rules), len(lines))
 	}
@@ -155,7 +200,7 @@ func TestVerifyGuardFixtures(t *testing.T) {
 	s := func(n int) time.Duration { return time.Duration(n) * time.Second }
 
 	empty, err := VerifyGuardJSON(readFixture(t, "guard_empty_nft-1.0.9.json"), c)
-	if err != nil || len(empty.Bound)+len(empty.Granted)+len(empty.GrantedDst) != 0 || len(empty.Counters) != 9 {
+	if err != nil || len(empty.Bound)+len(empty.Granted)+len(empty.GrantedDst) != 0 || len(empty.Counters) != 12 {
 		t.Fatalf("empty: %+v %v", empty, err)
 	}
 	got, err := VerifyGuardJSON(readFixture(t, "guard_elements_nft-1.0.9.json"), c)
@@ -281,6 +326,24 @@ func TestVerifyGuardRejectsMutations(t *testing.T) {
 			e[len(e)-1] = map[string]any{"accept": nil}
 			return l
 		},
+		"name-only guest-input deny": func(l []any) []any {
+			matchOf(ruleExpr(l, "guest-input"), 0)["left"] = jmeta("iifname")
+			return l
+		},
+		"name-only guest-egress deny": func(l []any) []any {
+			matchOf(ruleExpr(l, "guest-egress"), 0)["left"] = jmeta("iifname")
+			return l
+		},
+		"name-only guest-ingress deny": func(l []any) []any {
+			matchOf(ruleExpr(l, "guest-ingress"), 0)["left"] = jmeta("oifname")
+			return l
+		},
+		"guest grant loses index binding": func(l []any) []any {
+			_, rule := find(l, "rule", "comment", "grant-egress")
+			expr := rule["expr"].([]any)
+			rule["expr"] = append(expr[:1:1], expr[2:]...)
+			return l
+		},
 		"wrong iifname":  func(l []any) []any { matchOf(ruleExpr(l, "guest-input"), 0)["right"] = "guest1"; return l },
 		"wrong oifname":  func(l []any) []any { matchOf(ruleExpr(l, "grant-egress"), 1)["right"] = "lan0"; return l },
 		"wrong gateway":  func(l []any) []any { matchOf(ruleExpr(l, "guest-dns"), 1)["right"] = "10.203.0.2"; return l },
@@ -362,10 +425,14 @@ func TestVerifyGuardRejectsMutations(t *testing.T) {
 func TestVerifyGuardRejectsMalformedAndForeignConfig(t *testing.T) {
 	c := labGuard(t)
 	good := readFixture(t, "guard_empty_nft-1.0.9.json")
+	const duplicateTarget = `"family":"inet","name":"portcullis_guard"`
+	if !strings.Contains(string(good), duplicateTarget) {
+		t.Fatal("duplicate-key mutation target missing from fixture")
+	}
 	for name, data := range map[string][]byte{
 		"truncated":     good[:len(good)/2],
 		"trailing":      append(append([]byte{}, good...), []byte(`{}`)...),
-		"duplicate key": []byte(strings.Replace(string(good), `"family": "inet", "name": "portcullis_guard"`, `"family": "inet", "family": "inet", "name": "portcullis_guard"`, 1)),
+		"duplicate key": []byte(strings.Replace(string(good), duplicateTarget, `"family":"inet","family":"inet","name":"portcullis_guard"`, 1)),
 		"empty":         nil,
 	} {
 		if _, err := VerifyGuardJSON(data, c); !errors.Is(err, ErrGuardAttestation) {
