@@ -13,6 +13,6 @@
 
 ## Still unverified or excluded
 
-Production installation, reboot/reload persistence, crash recovery, physical network interface identity, bridge/flowtable/tc/XDP paths, local host OUTPUT, AP isolation, trusted client identity, accurate lease-to-kernel mapping, real conntrack cleanup, privileged IPC, captive portal and DHCP/DNS are not implemented.
+Physical host installation and boot/reload persistence, independently verified NIC identity, NetworkManager/hotplug lifecycle, the `iifname` / base-chain `policy accept` rename bypass, bridge/flowtable/tc/XDP and host OUTPUT packet paths, access-layer station binding, management recovery and physical acceptance remain unverified. The merged Formnext disposable vertical slice does implement demo-scoped controller IPC, DHCP/DNS, portal, bounded kernel grants and conntrack cleanup, with the scope and limitations described in [integration evidence](formnext-integration.md). These have not been accepted on physical hardware.
 
 Bootstrap whole-table replacement **does** admit a narrow possible kernel packet gap and must never be treated as an online reconciler. In-place replacement holds the base chains, but its limited flood test does not certify every kernel implementation or path. No live network has been tested.
