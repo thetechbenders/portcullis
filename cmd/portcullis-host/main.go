@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/thetechbenders/portcullis/internal/hostpreflight"
 )
@@ -18,15 +19,17 @@ func main() {
 // run is independently testable without invoking any privileged service or
 // touching a live interface. Nothing from this CLI authorizes activation.
 func run(args []string, out io.Writer, diag io.Writer, collect func() hostpreflight.Snapshot) int {
-	if len(args) == 0 || (args[0] != "inventory" && args[0] != "check") {
-		fmt.Fprintln(diag, "usage: portcullis-host inventory [-private] | check -plan FILE [-private]")
+	if len(args) == 0 || (args[0] != "inventory" && args[0] != "check" && args[0] != "watch") {
+		fmt.Fprintln(diag, "usage: portcullis-host inventory [-private] | check -plan FILE [-private] | watch -plan FILE [-samples 3] [-interval 1s] [-private]")
 		return 2
 	}
 	mode := args[0]
 	fs := flag.NewFlagSet(mode, flag.ContinueOnError)
 	fs.SetOutput(diag)
 	private := fs.Bool("private", false, "include sensitive device, network and plan identifiers in output")
-	planPath := fs.String("plan", "", "strict versioned operator-pinned host plan (check only)")
+	planPath := fs.String("plan", "", "strict versioned operator-pinned host plan (check/watch only)")
+	samples := fs.Int("samples", 3, "number of read-only observations for watch (2-120)")
+	interval := fs.Duration("interval", time.Second, "interval between watch observations (100ms-60s)")
 	if err := fs.Parse(args[1:]); err != nil || fs.NArg() != 0 {
 		return 2
 	}
@@ -34,18 +37,25 @@ func run(args []string, out io.Writer, diag io.Writer, collect func() hostprefli
 		fmt.Fprintln(diag, "inventory cannot select or validate a deployment plan")
 		return 2
 	}
-	if mode == "check" && *planPath == "" {
+	if (mode == "check" || mode == "watch") && *planPath == "" {
 		fmt.Fprintln(diag, "check requires -plan FILE")
 		return 2
 	}
 	var sel hostpreflight.Selection
-	if mode == "check" {
+	if mode == "check" || mode == "watch" {
 		var err error
 		sel, err = hostpreflight.LoadPlan(*planPath)
 		if err != nil {
 			fmt.Fprintln(diag, "invalid host plan:", err)
 			return 2
 		}
+	}
+	if mode == "watch" {
+		if *samples < 2 || *samples > 120 || *interval < 100*time.Millisecond || *interval > time.Minute {
+			fmt.Fprintln(diag, "watch requires 2-120 samples and a 100ms-60s interval")
+			return 2
+		}
+		return watch(sel, *private, *samples, out, diag, collect, func() { time.Sleep(*interval) })
 	}
 	snapshot := collect()
 	encoder := json.NewEncoder(out)
