@@ -111,7 +111,6 @@ func TestDNSFailureDoesNotFallThroughToHTTP(t *testing.T) {
 	}
 }
 
-
 func TestDirectGatewayDNSQuery(t *testing.T) {
 	server, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	if err != nil {
