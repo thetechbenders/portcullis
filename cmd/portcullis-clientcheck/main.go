@@ -3,7 +3,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -51,15 +54,116 @@ func validate(o options) error {
 	return nil
 }
 
+func skipDNSName(packet []byte, pos int) (int, error) {
+	for steps := 0; steps < 128; steps++ {
+		if pos >= len(packet) {
+			return 0, errors.New("DNS name exceeds response")
+		}
+		length := packet[pos]
+		if length&0xc0 == 0xc0 {
+			if pos+1 >= len(packet) {
+				return 0, errors.New("truncated DNS name pointer")
+			}
+			target := int(length&0x3f)<<8 | int(packet[pos+1])
+			if target >= len(packet) {
+				return 0, errors.New("DNS name pointer out of bounds")
+			}
+			return pos + 2, nil
+		}
+		if length&0xc0 != 0 {
+			return 0, errors.New("invalid DNS label encoding")
+		}
+		pos++
+		if length == 0 {
+			return pos, nil
+		}
+		if pos+int(length) > len(packet) {
+			return 0, errors.New("truncated DNS label")
+		}
+		pos += int(length)
+	}
+	return 0, errors.New("DNS name too long")
+}
+
+// resolver queries the specified gateway directly. net.Resolver would consult
+// /etc/hosts on some systems, which could falsely label broken guest DNS as OK.
 func resolver(o options) dnsLookup {
 	server := net.JoinHostPort(o.gateway.String(), strconv.Itoa(int(o.dnsPort)))
-	r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-		if network != "udp" && network != "udp4" && network != "tcp" && network != "tcp4" {
-			return nil, fmt.Errorf("unexpected DNS network %q", network)
+	return func(ctx context.Context, host string) ([]net.IP, error) {
+		var id [2]byte
+		if _, err := rand.Read(id[:]); err != nil {
+			return nil, err
 		}
-		return (&net.Dialer{}).DialContext(ctx, network, server)
-	}}
-	return func(ctx context.Context, host string) ([]net.IP, error) { return r.LookupIP(ctx, "ip4", host) }
+		query := make([]byte, 12)
+		copy(query[:2], id[:])
+		query[2] = 1 // recursion desired
+		query[5] = 1 // exactly one question
+		for _, label := range strings.Split(host, ".") {
+			query = append(query, byte(len(label)))
+			query = append(query, label...)
+		}
+		query = append(query, 0, 0, 1, 0, 1) // root, A, IN
+
+		conn, err := (&net.Dialer{}).DialContext(ctx, "udp4", server)
+		if err != nil {
+			return nil, err
+		}
+		defer conn.Close()
+		deadline := time.Now().Add(o.timeout)
+		if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+			deadline = d
+		}
+		if err := conn.SetDeadline(deadline); err != nil {
+			return nil, err
+		}
+		if _, err := conn.Write(query); err != nil {
+			return nil, err
+		}
+		response := make([]byte, 4096)
+		n, err := conn.Read(response)
+		if err != nil {
+			return nil, err
+		}
+		response = response[:n]
+		if n < 12 || !bytes.Equal(response[:2], id[:]) {
+			return nil, errors.New("invalid DNS response header or transaction ID")
+		}
+		flags := binary.BigEndian.Uint16(response[2:4])
+		if flags&0x8000 == 0 || flags&0x0200 != 0 || flags&0x000f != 0 || binary.BigEndian.Uint16(response[4:6]) != 1 {
+			return nil, errors.New("unexpected DNS response flags, truncation or question count")
+		}
+		count := int(binary.BigEndian.Uint16(response[6:8]))
+		if count > 64 {
+			return nil, errors.New("excessive DNS answer count")
+		}
+		end, err := skipDNSName(response, 12)
+		if err != nil || end+4 > len(response) {
+			return nil, errors.New("malformed DNS question")
+		}
+		if !bytes.Equal(response[12:end+4], query[12:]) {
+			return nil, errors.New("DNS response question mismatch")
+		}
+		pos := end + 4
+		var ips []net.IP
+		for i := 0; i < count; i++ {
+			pos, err = skipDNSName(response, pos)
+			if err != nil || pos+10 > len(response) {
+				return nil, errors.New("malformed DNS answer")
+			}
+			kind := binary.BigEndian.Uint16(response[pos : pos+2])
+			class := binary.BigEndian.Uint16(response[pos+2 : pos+4])
+			size := int(binary.BigEndian.Uint16(response[pos+8 : pos+10]))
+			pos += 10
+			if pos+size > len(response) {
+				return nil, errors.New("truncated DNS answer")
+			}
+			if kind == 1 && class == 1 && size == 4 {
+				ips = append(ips, net.IP(append([]byte(nil), response[pos:pos+4]...)))
+			}
+			pos += size
+		}
+		return ips, nil
+	}
 }
 
 func check(ctx context.Context, o options, lookup dnsLookup, client *http.Client, report io.Writer) error {
