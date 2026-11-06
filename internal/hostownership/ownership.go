@@ -58,6 +58,7 @@ type Observation struct {
 	BypassPathsAttested         *bool
 	KernelTargetCompatible      *bool
 	LocalRecoveryVerified       *bool
+	EvidenceFresh               *bool
 	// Each token must be bound to this exact observed boot/plan/guard and a
 	// non-expired authorization. A raw boolean authorization is not accepted.
 	BootID      string
@@ -66,6 +67,10 @@ type Observation struct {
 	Approval    *Approval
 }
 
+// EvidenceFresh is supplied only by a trusted observation layer that has
+// verified bounded age and continuous identity/guard state. It must never be
+// derived from a browser or untrusted JSON. A stale snapshot fails closed.
+//
 // Approval is an independently issued operator decision. The caller must
 // validate its authenticity and expiry before setting Valid to true; this
 // package also checks binding to boot, plan, guard and netdev generation.
@@ -144,6 +149,9 @@ func Evaluate(p Plan, o Observation) Decision {
 	}
 	if !yes(o.LocalRecoveryVerified) {
 		fail("recovery_unverified")
+	}
+	if !yes(o.EvidenceFresh) {
+		fail("evidence_stale")
 	}
 	if o.Approval == nil || !o.Approval.Valid || o.BootID == "" || o.PlanDigest == "" || o.GuardDigest == "" || o.GuestInterfaceGeneration == "" ||
 		o.Approval.BootID != o.BootID || o.Approval.PlanDigest != o.PlanDigest ||
