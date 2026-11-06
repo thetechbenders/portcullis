@@ -8,6 +8,7 @@
 package hostownership
 
 import (
+	"net"
 	"slices"
 	"strings"
 )
@@ -92,6 +93,19 @@ type Decision struct {
 func yes(b *bool) bool { return b != nil && *b }
 func no(b *bool) bool  { return b != nil && !*b }
 
+func validMAC(value string) bool {
+	mac, err := net.ParseMAC(value)
+	if err != nil || len(mac) != 6 || mac[0]&1 != 0 {
+		return false
+	}
+	for _, octet := range mac {
+		if octet != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func sameIdentity(want DeviceIdentity, got *DeviceIdentity) bool {
 	if got == nil {
 		return false
@@ -103,6 +117,9 @@ func sameIdentity(want DeviceIdentity, got *DeviceIdentity) bool {
 		if strings.TrimSpace(v) == "" {
 			return false
 		}
+	}
+	if !validMAC(want.CurrentMAC) || !validMAC(want.PermanentMAC) || !validMAC(got.CurrentMAC) || !validMAC(got.PermanentMAC) {
+		return false
 	}
 	return want.Name == got.Name && want.SysfsParent == got.SysfsParent &&
 		strings.EqualFold(want.CurrentMAC, got.CurrentMAC) &&
