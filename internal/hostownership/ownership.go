@@ -8,6 +8,9 @@
 package hostownership
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"net"
 	"slices"
 	"strings"
@@ -60,10 +63,9 @@ type Observation struct {
 	KernelTargetCompatible      *bool
 	LocalRecoveryVerified       *bool
 	EvidenceFresh               *bool
-	// Each token must be bound to this exact observed boot/plan/guard and a
-	// non-expired authorization. A raw boolean authorization is not accepted.
+	// These identifiers are supplied by a trusted observation layer. Approval
+	// authenticity, expiry and replay protection are verified by that layer.
 	BootID      string
-	PlanDigest  string
 	GuardDigest string
 	Approval    *Approval
 }
@@ -73,8 +75,9 @@ type Observation struct {
 // derived from a browser or untrusted JSON. A stale snapshot fails closed.
 //
 // Approval is an independently issued operator decision. The caller must
-// validate its authenticity and expiry before setting Valid to true; this
-// package also checks binding to boot, plan, guard and netdev generation.
+// validate its authenticity, expiry and non-replay before setting Valid true.
+// Evaluate checks the plan digest computed from the actual Plan, plus boot,
+// guard and netdev-generation bindings; Valid alone is not authentication.
 type Approval struct {
 	Valid                    bool
 	BootID                   string
@@ -88,6 +91,18 @@ type Approval struct {
 type Decision struct {
 	MayRequestGuestUp bool
 	Reasons           []string
+}
+
+// PlanDigest derives a versioned, domain-separated SHA-256 binding from every
+// current Plan field. The approval issuer must independently authenticate the
+// request and use this digest for the exact approved plan.
+func PlanDigest(p Plan) string {
+	payload, err := json.Marshal(p)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(append([]byte("portcullis-hostownership-plan-v1\x00"), payload...))
+	return hex.EncodeToString(sum[:])
 }
 
 func yes(b *bool) bool { return b != nil && *b }
@@ -130,11 +145,12 @@ func sameIdentity(want DeviceIdentity, got *DeviceIdentity) bool {
 
 // Evaluate requires fresh, independent proof of every prerequisite. It never
 // produces mutating actions. A missed NetworkManager exclusion, replug,
-// rename, guard flush, or unknown state therefore cannot authorize UP.
+// rename, guard flush, or unknown state cannot authorize UP when the trusted
+// observer reports the corresponding evidence accurately.
 func Evaluate(p Plan, o Observation) Decision {
 	var reasons []string
 	fail := func(code string) { reasons = append(reasons, code) }
-	if p.Guest.Name == "" || p.UplinkName == "" || p.ManagementName == "" ||
+	if strings.TrimSpace(p.Guest.Name) == "" || strings.TrimSpace(p.UplinkName) == "" || strings.TrimSpace(p.ManagementName) == "" ||
 		p.Guest.Name == p.UplinkName || p.Guest.Name == p.ManagementName || p.UplinkName == p.ManagementName {
 		fail("invalid_roles")
 	}
@@ -170,8 +186,9 @@ func Evaluate(p Plan, o Observation) Decision {
 	if !yes(o.EvidenceFresh) {
 		fail("evidence_stale")
 	}
-	if o.Approval == nil || !o.Approval.Valid || o.BootID == "" || o.PlanDigest == "" || o.GuardDigest == "" || o.GuestInterfaceGeneration == "" ||
-		o.Approval.BootID != o.BootID || o.Approval.PlanDigest != o.PlanDigest ||
+	if o.Approval == nil || !o.Approval.Valid || strings.TrimSpace(o.BootID) == "" || strings.TrimSpace(o.GuardDigest) == "" || strings.TrimSpace(o.GuestInterfaceGeneration) == "" ||
+		strings.TrimSpace(o.Approval.BootID) == "" || strings.TrimSpace(o.Approval.PlanDigest) == "" || strings.TrimSpace(o.Approval.GuardDigest) == "" || strings.TrimSpace(o.Approval.GuestInterfaceGeneration) == "" ||
+		o.Approval.BootID != o.BootID || o.Approval.PlanDigest != PlanDigest(p) ||
 		o.Approval.GuardDigest != o.GuardDigest || o.Approval.GuestInterfaceGeneration != o.GuestInterfaceGeneration {
 		fail("approval_unverified")
 	}
@@ -188,8 +205,8 @@ type RuntimeState struct {
 	ExistingKernelGrantsMayRemain bool
 }
 
-// OnFault requests a closed state without claiming that a privileged actor
-// succeeded in enforcing it. Existing grants may outlive a controller crash,
+// OnFault reports a point-in-time administrative DOWN readback, not sustained
+// physical isolation or proof that a privileged actor enforced it. Existing grants may outlive a controller crash,
 // bounded by their kernel timeout (currently at most fifteen minutes).
 func OnFault(guardAttested, adminDownReadback bool) RuntimeState {
 	return RuntimeState{
