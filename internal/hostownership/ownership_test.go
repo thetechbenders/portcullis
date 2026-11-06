@@ -17,7 +17,7 @@ func baseline() (Plan, Observation) {
 		ManagementPathPreserved: ptr(true), ManagementRoutePreserved: ptr(true), IsolatedUplinkPeer: ptr(true),
 		GuardAttested: ptr(true), GuardBlocksUnknownIngress: ptr(true), GuardBlocksGuestInput: ptr(true),
 		GuardBlocksGuestOutput: ptr(true), BypassPathsAttested: ptr(true), KernelTargetCompatible: ptr(true),
-		LocalRecoveryVerified: ptr(true), BootID: "boot-test", PlanDigest: "plan-test", GuardDigest: "guard-test",
+		LocalRecoveryVerified: ptr(true), EvidenceFresh: ptr(true), BootID: "boot-test", PlanDigest: "plan-test", GuardDigest: "guard-test",
 		GuestInterfaceGeneration: "netdev-instance-test",
 	}
 	o.Approval = &Approval{Valid: true, BootID: o.BootID, PlanDigest: o.PlanDigest, GuardDigest: o.GuardDigest, GuestInterfaceGeneration: o.GuestInterfaceGeneration}
@@ -64,6 +64,8 @@ func TestOneFaultNeverAuthorizes(t *testing.T) {
 		"bypass unknown":            func(_ *Plan, o *Observation) { o.BypassPathsAttested = nil },
 		"kernel mismatch":           func(_ *Plan, o *Observation) { o.KernelTargetCompatible = ptr(false) },
 		"recovery missing":          func(_ *Plan, o *Observation) { o.LocalRecoveryVerified = ptr(false) },
+		"stale snapshot":            func(_ *Plan, o *Observation) { o.EvidenceFresh = ptr(false) },
+		"unknown freshness":         func(_ *Plan, o *Observation) { o.EvidenceFresh = nil },
 		"replug new instance":       func(_ *Plan, o *Observation) { o.GuestInterfaceGeneration = "replug-2" },
 		"boot changed":              func(_ *Plan, o *Observation) { o.BootID = "different-boot" },
 		"guard changed":             func(_ *Plan, o *Observation) { o.GuardDigest = "new-guard" },
