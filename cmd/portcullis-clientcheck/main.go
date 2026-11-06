@@ -227,10 +227,15 @@ func check(ctx context.Context, o options, lookup dnsLookup, client *http.Client
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 32<<10)).Decode(&session); err != nil {
 		return fmt.Errorf("session JSON invalid: %w", err)
 	}
-	if !session.OK || session.Session.State == "" {
+	if !session.OK {
 		return errors.New("session response did not confirm a recognized guest")
 	}
-	fmt.Fprintf(report, "PASS session API: recognized client, state=%s\n", session.Session.State)
+	switch session.Session.State {
+	case "denied", "granted", "revoked":
+	default:
+		return fmt.Errorf("session state %q is not a recognized guest", session.Session.State)
+	}
+	fmt.Fprintf(report, "PASS session API: recognized client, state=%q\n", session.Session.State)
 	fmt.Fprintln(report, "NOTE read-only application reachability only; not evidence of firewall denial or physical isolation")
 	return nil
 }
