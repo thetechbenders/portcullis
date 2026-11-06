@@ -4,7 +4,7 @@
 
 The probe checks, in order:
 
-1. Explicit DNS lookup against the nominated gateway's DNS port: portal hostname must return only the expected gateway IPv4 address.
+1. Direct UDP DNS A query to the nominated gateway's DNS port (no local hosts-file or system-resolver fallback): portal hostname must return only the expected gateway IPv4 address. Truncated replies fail rather than silently switching to another resolver.
 2. HTTP GET `/` to that gateway, using the configured portal `Host`. It requires HTTP 200 with HTML content type.
 3. Read-only GET `/api/session`, requiring a successful JSON response from a recognized guest. Reports only the session state, not IP/MAC or tokens.
 
