@@ -1,6 +1,6 @@
 # Pi 5 passive host inventory and topology check (experimental)
 
-**Status:** Read-only host preflight merged via [PR #19](https://github.com/thetechbenders/portcullis/pull/19) and hardened via [PR #20](https://github.com/thetechbenders/portcullis/pull/20), for [issue #10](https://github.com/thetechbenders/portcullis/issues/10). The physical ownership design was merged via [ADR PR #18](https://github.com/thetechbenders/portcullis/pull/18), and the non-deployable contract and pure eligibility gate via [PR #21](https://github.com/thetechbenders/portcullis/pull/21) and [PR #22](https://github.com/thetechbenders/portcullis/pull/22). **None of these changes authorizes activating a guest interface.**
+**Status:** Read-only host preflight merged via [PR #19](https://github.com/thetechbenders/portcullis/pull/19) and hardened via [PR #20](https://github.com/thetechbenders/portcullis/pull/20), for [issue #10](https://github.com/thetechbenders/portcullis/issues/10). The proposed, not-yet-accepted ownership ADR was added via [PR #18](https://github.com/thetechbenders/portcullis/pull/18), its proposed non-executable contract via [PR #21](https://github.com/thetechbenders/portcullis/pull/21), and the separate non-deployable pure eligibility gate via [PR #22](https://github.com/thetechbenders/portcullis/pull/22). **None of these changes authorizes activating a guest interface.**
 
 ## Design: two non-mutating stages
 
