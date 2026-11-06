@@ -126,8 +126,7 @@ func check(ctx context.Context, o options, lookup dnsLookup, client *http.Client
 	if !session.OK || session.Session.State == "" {
 		return errors.New("session response did not confirm a recognized guest")
 	}
-	fmt.Fprintf(report, "PASS session API: recognized client, state=%s
-", session.Session.State)
+	fmt.Fprintf(report, "PASS session API: recognized client, state=%s\n", session.Session.State)
 	fmt.Fprintln(report, "NOTE read-only application reachability only; not evidence of firewall denial or physical isolation")
 	return nil
 }
