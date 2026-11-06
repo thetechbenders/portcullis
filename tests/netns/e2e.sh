@@ -161,7 +161,30 @@ gw sysctl -qw net.ipv6.conf.guest0.disable_ipv6=1
 a sysctl -qw net.ipv6.conf.eth0.disable_ipv6=1
 ip -n "$ns_gw" link set guest0 down
 gw "$state/bin/portcullisd" bootstrap -config "$state/portcullis.json"
+# An interface-name guard under policy accept leaks on rename. Prove the
+# index-pinned INPUT and both FORWARD deny directions survive a new name.
+# This is a disposable namespace fixture with no controller/client service up.
+guest_index_before=$(ip -n "$ns_gw" -j link show guest0 | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["ifindex"])')
+ip -n "$ns_gw" link set guest0 name rotated0
+guest_index_after=$(ip -n "$ns_gw" -j link show rotated0 | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["ifindex"])')
+[[ $guest_index_before == "$guest_index_after" ]] || die "rename changed netdevice index unexpectedly"
+ip -n "$ns_gw" link set rotated0 up
+probe "$ns_gw" 10.203.0.1 "$ns_a" deny guest-input
+probe "$ns_wan" 198.18.0.2 "$ns_a" deny guest-egress
+probe "$ns_a" 10.203.0.100 "$ns_wan" deny guest-ingress
+# Give an unrelated NIC the vacated guest0 name. Its different ifindex must
+# not satisfy guest ALLOW rules, and the complementary name deny must catch it.
+ip -n "$ns_gw" link set lan0 down
+ip -n "$ns_gw" link set lan0 name guest0
 ip -n "$ns_gw" link set guest0 up
+probe "$ns_gw" 10.204.0.1 "$ns_lan" deny guest-input-name
+ip -n "$ns_gw" link set guest0 down
+ip -n "$ns_gw" link set guest0 name lan0
+ip -n "$ns_gw" link set lan0 up
+ip -n "$ns_gw" link set rotated0 down
+ip -n "$ns_gw" link set rotated0 name guest0
+ip -n "$ns_gw" link set guest0 up
+gw "$state/bin/portcullisd" attest -config "$state/portcullis.json"
 start_controller
 start_bg portal ip netns exec "$ns_gw" setpriv --reuid=65534 --regid=65534 --clear-groups --no-new-privs \
   "$state/bin/portcullis-portal" -config "$state/portcullis.json" -ready-file "$state/portal-ready/ready"

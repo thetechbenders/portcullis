@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -41,7 +42,10 @@ var ErrGuardConfig = errors.New("invalid portcullis guard configuration")
 
 // GuardConfig is the typed input to every guard renderer and verifier.
 type GuardConfig struct {
-	Guest, Uplink       string
+	Guest, Uplink string
+	// GuestIfIndex pins deny rules to the existing netdevice, so a rename
+	// cannot escape the name-based allow rules. Re-enumeration is NOT covered.
+	GuestIfIndex        int
 	GatewayV4           netip.Addr
 	PortalPort, DNSPort uint16
 	Protected           []netip.Prefix
@@ -52,8 +56,12 @@ func GuardConfigFrom(c *config.Config) GuardConfig {
 	if c == nil {
 		return GuardConfig{}
 	}
+	idx := 0
+	if iface, err := net.InterfaceByName(c.GuestInterface); err == nil {
+		idx = iface.Index
+	}
 	return GuardConfig{
-		Guest: c.GuestInterface, Uplink: c.UplinkInterface, GatewayV4: c.GatewayV4,
+		Guest: c.GuestInterface, Uplink: c.UplinkInterface, GuestIfIndex: idx, GatewayV4: c.GatewayV4,
 		PortalPort: c.PortalPort, DNSPort: c.DNSPort, Protected: slices.Clone(c.ProtectedV4),
 	}
 }
@@ -61,6 +69,9 @@ func GuardConfigFrom(c *config.Config) GuardConfig {
 // Validate rejects anything that could not be rendered as literal nft text
 // without quoting ambiguity. Interface names are the only strings rendered.
 func (c GuardConfig) Validate() error {
+	if c.GuestIfIndex <= 0 {
+		return fmt.Errorf("%w: guest interface must exist and have a pinned kernel ifindex", ErrGuardConfig)
+	}
 	if !safeInterface.MatchString(c.Guest) || !safeInterface.MatchString(c.Uplink) {
 		return fmt.Errorf("%w: interface names must be 1-15 safe ASCII bytes", ErrGuardConfig)
 	}
@@ -144,6 +155,12 @@ func termIfname(key, name string) guardTerm {
 	return guardTerm{text: key + ` "` + name + `"`, expr: jmatch("==", jmeta(key), name)}
 }
 
+func termIfIndex(key string, idx int, name string) guardTerm {
+	// nft resolves an existing ifindex to its current interface name in the
+	// default JSON listing. The rule itself stores the stable numeric index.
+	return guardTerm{text: fmt.Sprintf("%s %d", key, idx), expr: jmatch("==", jmeta(key), name)}
+}
+
 func termPort(proto, field string, port uint16) guardTerm {
 	return guardTerm{
 		text: fmt.Sprintf("%s %s %d", proto, field, port),
@@ -175,6 +192,7 @@ func termProtected(prefixes []netip.Prefix) guardTerm {
 // must precede the catch-all drop for its direction.
 func guardRules(c GuardConfig) []guardRule {
 	guestIn, guestOut := termIfname("iifname", c.Guest), termIfname("oifname", c.Guest)
+	guestIndexIn, guestIndexOut := termIfIndex("iif", c.GuestIfIndex, c.Guest), termIfIndex("oif", c.GuestIfIndex, c.Guest)
 	upIn, upOut := termIfname("iifname", c.Uplink), termIfname("oifname", c.Uplink)
 	toGateway := guardTerm{text: "ip daddr " + c.GatewayV4.String(), expr: jmatch("==", jpayload("ip", "daddr"), c.GatewayV4.String())}
 	nfproto := guardTerm{text: "meta nfproto ipv4", expr: jmatch("==", jmeta("nfproto"), "ipv4")}
@@ -186,15 +204,18 @@ func guardRules(c GuardConfig) []guardRule {
 		expr: jmatch("in", map[string]any{"ct": map[string]any{"key": "state"}}, []any{"established", "related"}),
 	}
 	return []guardRule{
-		{chainInput, "guest-dhcp", []guardTerm{guestIn, nfproto, termPort("udp", "sport", 68), termPort("udp", "dport", 67)}, "accept"},
-		{chainInput, "guest-dns", []guardTerm{guestIn, toGateway, termSourcePair(SetBound), termPort("udp", "dport", c.DNSPort), original}, "accept"},
-		{chainInput, "guest-portal", []guardTerm{guestIn, toGateway, termSourcePair(SetBound), termPort("tcp", "dport", c.PortalPort), original}, "accept"},
-		{chainInput, "guest-input", []guardTerm{guestIn}, "drop"},
+		{chainInput, "guest-dhcp", []guardTerm{guestIn, guestIndexIn, nfproto, termPort("udp", "sport", 68), termPort("udp", "dport", 67)}, "accept"},
+		{chainInput, "guest-dns", []guardTerm{guestIn, guestIndexIn, toGateway, termSourcePair(SetBound), termPort("udp", "dport", c.DNSPort), original}, "accept"},
+		{chainInput, "guest-portal", []guardTerm{guestIn, guestIndexIn, toGateway, termSourcePair(SetBound), termPort("tcp", "dport", c.PortalPort), original}, "accept"},
+		{chainInput, "guest-input", []guardTerm{guestIndexIn}, "drop"},
+		{chainInput, "guest-input-name", []guardTerm{guestIn}, "drop"},
 		{chainForward, "guest-protected", []guardTerm{guestIn, termProtected(c.Protected)}, "drop"},
-		{chainForward, "grant-egress", []guardTerm{guestIn, upOut, termSourcePair(SetGranted)}, "accept"},
-		{chainForward, "guest-egress", []guardTerm{guestIn}, "drop"},
-		{chainForward, "grant-ingress", []guardTerm{upIn, guestOut, toGrantedDst, reply, established}, "accept"},
-		{chainForward, "guest-ingress", []guardTerm{guestOut}, "drop"},
+		{chainForward, "grant-egress", []guardTerm{guestIn, guestIndexIn, upOut, termSourcePair(SetGranted)}, "accept"},
+		{chainForward, "guest-egress", []guardTerm{guestIndexIn}, "drop"},
+		{chainForward, "guest-egress-name", []guardTerm{guestIn}, "drop"},
+		{chainForward, "grant-ingress", []guardTerm{upIn, guestOut, guestIndexOut, toGrantedDst, reply, established}, "accept"},
+		{chainForward, "guest-ingress", []guardTerm{guestIndexOut}, "drop"},
+		{chainForward, "guest-ingress-name", []guardTerm{guestOut}, "drop"},
 	}
 }
 
