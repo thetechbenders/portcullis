@@ -67,6 +67,15 @@ table inet portcullis_guard {
 		oif 17 counter drop comment "guest-ingress"
 		oifname "guest0" counter drop comment "guest-ingress-name"
 	}
+	chain guest_output {
+		type filter hook output priority -50; policy accept;
+		oifname "guest0" oif 17 meta nfproto ipv4 udp sport 67 udp dport 68 counter accept comment "host-dhcp"
+		oifname "guest0" oif 17 meta nfproto ipv4 ct state established,related counter accept comment "host-reply"
+		oifname "guest0" oif 17 ip saddr 10.203.0.1 udp sport 53 counter accept comment "host-dns"
+		oifname "guest0" oif 17 ip saddr 10.203.0.1 tcp sport 80 counter accept comment "host-portal"
+		oif 17 counter drop comment "guest-output"
+		oifname "guest0" counter drop comment "guest-output-name"
+	}
 }
 `
 
@@ -82,6 +91,7 @@ func TestGuestDenyRulesPinKernelIndex(t *testing.T) {
 		`iif 17 counter drop comment "guest-input"`,
 		`iif 17 counter drop comment "guest-egress"`,
 		`oif 17 counter drop comment "guest-ingress"`,
+		`oif 17 counter drop comment "guest-output"`,
 	} {
 		if !strings.Contains(got, rule) {
 			t.Fatalf("missing index-pinned deny %q", rule)
@@ -101,6 +111,7 @@ func TestGuestDenyRulesPinKernelIndex(t *testing.T) {
 		`iifname "guest0" counter drop comment "guest-input-name"`,
 		`iifname "guest0" counter drop comment "guest-egress-name"`,
 		`oifname "guest0" counter drop comment "guest-ingress-name"`,
+		`oifname "guest0" counter drop comment "guest-output-name"`,
 	} {
 		if !strings.Contains(got, namedDeny) {
 			t.Fatalf("missing complementary guest-name deny %q", namedDeny)
@@ -142,7 +153,8 @@ func TestBootstrapAndVerifierShareRuleSpec(t *testing.T) {
 	}
 	rules := guardRules(c)
 	wantOrder := []string{"guest-dhcp", "guest-dns", "guest-portal", "guest-input", "guest-input-name",
-		"guest-protected", "grant-egress", "guest-egress", "guest-egress-name", "grant-ingress", "guest-ingress", "guest-ingress-name"}
+		"guest-protected", "grant-egress", "guest-egress", "guest-egress-name", "grant-ingress", "guest-ingress", "guest-ingress-name",
+		"host-dhcp", "host-reply", "host-dns", "host-portal", "guest-output", "guest-output-name"}
 	if len(rules) != len(wantOrder) || len(lines) != len(rules) {
 		t.Fatalf("rule count: spec %d rendered %d", len(rules), len(lines))
 	}
@@ -200,7 +212,7 @@ func TestVerifyGuardFixtures(t *testing.T) {
 	s := func(n int) time.Duration { return time.Duration(n) * time.Second }
 
 	empty, err := VerifyGuardJSON(readFixture(t, "guard_empty_nft-1.0.9.json"), c)
-	if err != nil || len(empty.Bound)+len(empty.Granted)+len(empty.GrantedDst) != 0 || len(empty.Counters) != 12 {
+	if err != nil || len(empty.Bound)+len(empty.Granted)+len(empty.GrantedDst) != 0 || len(empty.Counters) != 18 {
 		t.Fatalf("empty: %+v %v", empty, err)
 	}
 	got, err := VerifyGuardJSON(readFixture(t, "guard_elements_nft-1.0.9.json"), c)
@@ -302,6 +314,22 @@ func TestVerifyGuardRejectsMutations(t *testing.T) {
 			for _, k := range []string{"type", "hook", "prio", "policy"} {
 				delete(ch, k)
 			}
+			return l
+		},
+		"missing output hook": func(l []any) []any {
+			_, ch := find(l, "chain", "name", chainOutput)
+			delete(ch, "hook")
+			return l
+		},
+		"host output deny becomes accept": func(l []any) []any {
+			e := ruleExpr(l, "guest-output")
+			e[len(e)-1] = map[string]any{"accept": nil}
+			return l
+		},
+		"host response escapes guest binding": func(l []any) []any {
+			_, r := find(l, "rule", "comment", "host-portal")
+			e := r["expr"].([]any)
+			r["expr"] = append(e[:1:1], e[2:]...)
 			return l
 		},
 		"wrong hook": func(l []any) []any {

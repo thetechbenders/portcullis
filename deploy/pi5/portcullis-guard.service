@@ -1,0 +1,14 @@
+[Unit]
+Description=Portcullis guard for supervised cable-disconnected pilot
+Documentation=https://github.com/thetechbenders/portcullis
+Requisite=NetworkManager.service
+After=NetworkManager.service
+RequiresMountsFor=/etc/portcullis
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/libexec/portcullis-pilot-closed install-guard /etc/portcullis/config.json
+TimeoutStartSec=90
+NoNewPrivileges=yes
+# Static unit. Stopping it leaves the hooked guard in place.

@@ -11,12 +11,18 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
       - name: Test
         run: go test ./...
+      - name: Linux ARM64 build
+        run: |
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o "${{ runner.temp }}/arm64/" ./cmd/...
+          file "${{ runner.temp }}"/arm64/* | tee "${{ runner.temp }}/arm64-file.txt"
+          test -z "$(grep -v 'ELF 64-bit.*ARM aarch64.*statically linked' "${{ runner.temp }}/arm64-file.txt")"
       - name: Race
         run: go test -race ./...
       - name: Vet
@@ -29,19 +35,22 @@ jobs:
           test -z "$(gofmt -l .)"
       - name: Python relay unit tests
         run: python3 -m unittest discover -s demo -p 'test_*.py' -v
+      - name: Pi first-pilot preflight tests
+        run: python3 -m unittest discover -s deploy/pi5 -p 'test_*.py' -v
       - name: Script syntax
         run: |
           for f in tests/netns/run.sh tests/netns/e2e.sh demo/portcullis-lab.sh; do bash -n "$f"; done
           sh -n tests/netns/udhcpc.script
-          python3 -m py_compile tests/netns/*.py demo/nsproxy.py
+          python3 -m py_compile tests/netns/*.py demo/nsproxy.py deploy/pi5/*.py
   netns:
     timeout-minutes: 10
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
       - name: Install isolated lab prerequisites
         run: |
           sudo apt-get update -qq
@@ -59,10 +68,11 @@ jobs:
     timeout-minutes: 15
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
       - name: Install disposable namespace prerequisites
         run: |
           sudo apt-get update -qq
