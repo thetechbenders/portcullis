@@ -12,7 +12,7 @@ func TestScopedRenderers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if nm != "[keyfile]\nunmanaged-devices=mac:02:00:00:00:00:11\n" {
+	if nm != "[keyfile]\nunmanaged-devices=type:ethernet;except:mac:02:00:00:00:00:22\n" {
 		t.Fatalf("unexpected exclusion: %q", nm)
 	}
 	netplan, err := RenderUplinkNetplanDefinition(id)
