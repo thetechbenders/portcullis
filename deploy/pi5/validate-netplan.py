@@ -39,6 +39,12 @@ def validate(baseline, replacement, uplink_mac):
         for directory in ("etc/netplan", "lib/netplan", "run/netplan"):
             if (baseline / directory).is_dir():
                 shutil.copytree(baseline / directory, root / directory)
+        # The packaged global renderer file is public, which upstream
+        # Netplan warns about even inside a private rehearsal directory.
+        # Normalize permissions on its sandbox copy only.
+        vendor = root / "lib/netplan/00-network-manager-all.yaml"
+        if vendor.is_file():
+            vendor.chmod(0o600)
         target = root / "etc/netplan" / replacement.name
         source = target.read_bytes()
         before = generate(root)
@@ -51,6 +57,9 @@ def validate(baseline, replacement, uplink_mac):
         after = generate(root)
         if before.keys() != after.keys() or before[wifi[0]] != after[wifi[0]]:
             raise ValueError("management profile or inventory changed")
+        nm_config = root / "run/NetworkManager/conf.d/netplan.conf"
+        if nm_config.exists() and "match-device=type:ethernet" in nm_config.read_text():
+            raise ValueError("Netplan still marks all Ethernet devices as managed")
         old, new = keyfile(before[wired[0]]), keyfile(after[wired[0]])
         if old["connection"]["uuid"] != new["connection"]["uuid"]:
             raise ValueError("wired profile UUID changed")
@@ -76,7 +85,8 @@ def main():
         uplink = json.loads(args.pins.read_text(encoding="utf-8"))["uplink"]["mac"]
         validate(args.baseline, args.replacement, uplink)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as err:
-        raise SystemExit("private Netplan rehearsal failed: " + type(err).__name__) from None
+        detail = str(err) if type(err) is ValueError else type(err).__name__
+        raise SystemExit("private Netplan rehearsal failed: " + detail) from None
     print("Netplan install and rollback generation passed")
 
 

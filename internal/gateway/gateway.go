@@ -160,14 +160,8 @@ func (k *Kernel) bootstrap(ctx context.Context, reuseClosed bool) error {
 		return err
 	}
 	if reuseClosed {
-		// Refuse known bypass and topology failures before committing rules.
-		ruleset, err := k.NFT.ListRuleset(ctx)
-		if err != nil {
-			return err
-		}
-		if err := enforce.VerifyNoBypass(ruleset, k.Guard); err != nil {
-			return err
-		}
+		// Check the link topology before writing. Whole-ruleset attestation
+		// also verifies the guard itself and therefore follows creation.
 		if err := k.checkTopology(ctx); err != nil {
 			return err
 		}
