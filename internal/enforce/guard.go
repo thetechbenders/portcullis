@@ -34,6 +34,7 @@ const (
 	guardPriority        = -50
 	chainInput           = "guest_input"
 	chainForward         = "guest_forward"
+	chainOutput          = "guest_output"
 )
 
 // ErrGuardConfig rejects a guard description that cannot be rendered or
@@ -125,7 +126,7 @@ func (r guardRule) text() string {
 	return strings.Join(parts, " ") + " counter " + r.verdict + ` comment "` + r.comment + `"`
 }
 
-var guardChains = []struct{ name, hook string }{{chainInput, "input"}, {chainForward, "forward"}}
+var guardChains = []struct{ name, hook string }{{chainInput, "input"}, {chainForward, "forward"}, {chainOutput, "output"}}
 
 type guardSet struct {
 	name, typeText string
@@ -216,6 +217,10 @@ func guardRules(c GuardConfig) []guardRule {
 		{chainForward, "grant-ingress", []guardTerm{upIn, guestOut, guestIndexOut, toGrantedDst, reply, established}, "accept"},
 		{chainForward, "guest-ingress", []guardTerm{guestIndexOut}, "drop"},
 		{chainForward, "guest-ingress-name", []guardTerm{guestOut}, "drop"},
+		// Deny host-originated traffic to the guest until an explicit, attested
+		// OUTPUT service policy exists. This disables guest DHCP response traffic.
+		{chainOutput, "guest-output", []guardTerm{guestIndexOut}, "drop"},
+		{chainOutput, "guest-output-name", []guardTerm{guestOut}, "drop"},
 	}
 }
 
