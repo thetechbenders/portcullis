@@ -54,7 +54,7 @@ class PilotRestrictTests(unittest.TestCase):
 
     def test_missing_policy_refused(self):
         (self.policy / "accept_ra").unlink()
-        with self.assertRaises(OSError):
+        with self.assertRaisesRegex(ValueError, "missing"):
             self.restrict()
 
     def test_missing_physical_parent_refused(self):
