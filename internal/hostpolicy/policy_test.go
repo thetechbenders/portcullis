@@ -50,6 +50,32 @@ func TestRejectAmbiguousRolesAndInvalidMAC(t *testing.T) {
 	}
 }
 
+func TestUSBDefaultDenyRequiresIndependentRecovery(t *testing.T) {
+	all := USBBootEvidence{RootFilesystemNonUSB: true, ManagementPathNonUSB: true, RecoveryPathNonUSB: true, KernelParameterSupported: true}
+	arg, err := RenderUSBDefaultDenyKernelArg(all)
+	if err != nil || arg != "usbcore.authorized_default=0" {
+		t.Fatalf("unexpected USB lockdown proposal: %q, %v", arg, err)
+	}
+	cases := []struct {
+		name string
+		breakCondition func(*USBBootEvidence)
+	}{
+		{"USB root storage", func(e *USBBootEvidence) { e.RootFilesystemNonUSB = false }},
+		{"USB management", func(e *USBBootEvidence) { e.ManagementPathNonUSB = false }},
+		{"USB recovery", func(e *USBBootEvidence) { e.RecoveryPathNonUSB = false }},
+		{"unknown kernel support", func(e *USBBootEvidence) { e.KernelParameterSupported = false }},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			bad := all
+			tt.breakCondition(&bad)
+			if arg, err := RenderUSBDefaultDenyKernelArg(bad); !errors.Is(err, ErrUnsafePlan) || arg != "" {
+				t.Fatalf("unsafe USB lockdown accepted: %q, %v", arg, err)
+			}
+		})
+	}
+}
+
 func TestProvisioningIsExplicitlyGated(t *testing.T) {
 	for _, flags := range [][3]bool{{false, true, true}, {true, false, true}, {true, true, false}, {false, false, false}} {
 		if err := EvaluateProvisioning(flags[0], flags[1], flags[2]); !errors.Is(err, ErrUnsafePlan) {
