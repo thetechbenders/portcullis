@@ -22,6 +22,13 @@ func TestScopedRenderers(t *testing.T) {
 	if !strings.Contains(netplan, "macaddress: 02:00:00:00:00:22") || strings.Contains(netplan, "00:11") || strings.Contains(netplan, "00:33") {
 		t.Fatalf("uplink selector is not isolated: %q", netplan)
 	}
+	link, err := RenderGuestLinkDown(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(link, "PermanentMACAddress=02:00:00:00:00:11") || !strings.Contains(link, "ActivationPolicy=down") || strings.Contains(link, "00:22") {
+		t.Fatalf("unsafe guest link policy: %q", link)
+	}
 	service := RenderNftablesServiceOverride()
 	if strings.Contains(service, "flush") || !strings.Contains(service, "ExecStop=\n") || !strings.Contains(service, "ExecReload=\n") || !strings.Contains(service, "ExecStart=/usr/bin/true") {
 		t.Fatalf("unsafe nft lifecycle proposal: %q", service)
@@ -45,6 +52,9 @@ func TestRejectAmbiguousRolesAndInvalidMAC(t *testing.T) {
 			}
 			if _, err := RenderUplinkNetplanDefinition(id); !errors.Is(err, ErrUnsafePlan) {
 				t.Fatalf("netplan accepted invalid identity: %v", err)
+			}
+			if _, err := RenderGuestLinkDown(id); !errors.Is(err, ErrUnsafePlan) {
+				t.Fatalf("link accepted invalid identity: %v", err)
 			}
 		})
 	}
