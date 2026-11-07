@@ -217,8 +217,11 @@ func guardRules(c GuardConfig) []guardRule {
 		{chainForward, "grant-ingress", []guardTerm{upIn, guestOut, guestIndexOut, toGrantedDst, reply, established}, "accept"},
 		{chainForward, "guest-ingress", []guardTerm{guestIndexOut}, "drop"},
 		{chainForward, "guest-ingress-name", []guardTerm{guestOut}, "drop"},
-		// Deny host-originated traffic to the guest until an explicit, attested
-		// OUTPUT service policy exists. This disables guest DHCP response traffic.
+		// Deny every other host-originated packet to the guest.
+		// Permit only DHCP responses and stateful IPv4 replies from host services.
+		// INPUT authorization still gates which guest requests can reach them.
+		{chainOutput, "host-dhcp", []guardTerm{guestOut, guestIndexOut, nfproto, termPort("udp", "sport", 67), termPort("udp", "dport", 68)}, "accept"},
+		{chainOutput, "host-reply", []guardTerm{guestOut, guestIndexOut, nfproto, established}, "accept"},
 		{chainOutput, "guest-output", []guardTerm{guestIndexOut}, "drop"},
 		{chainOutput, "guest-output-name", []guardTerm{guestOut}, "drop"},
 	}
