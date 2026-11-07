@@ -82,9 +82,9 @@ func RenderUplinkNetplanDefinition(i Identity) (string, error) {
 // recovery depends on USB. These booleans are evidence inputs, not attestations
 // performed by this package.
 type USBBootEvidence struct {
-	RootFilesystemNonUSB bool
-	ManagementPathNonUSB bool
-	RecoveryPathNonUSB   bool
+	RootFilesystemNonUSB     bool
+	ManagementPathNonUSB     bool
+	RecoveryPathNonUSB       bool
 	KernelParameterSupported bool
 }
 
