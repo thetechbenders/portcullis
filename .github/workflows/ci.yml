@@ -29,11 +29,13 @@ jobs:
           test -z "$(gofmt -l .)"
       - name: Python relay unit tests
         run: python3 -m unittest discover -s demo -p 'test_*.py' -v
+      - name: Pi first-pilot preflight tests
+        run: python3 -m unittest discover -s deploy/pi5 -p 'test_*.py' -v
       - name: Script syntax
         run: |
           for f in tests/netns/run.sh tests/netns/e2e.sh demo/portcullis-lab.sh; do bash -n "$f"; done
           sh -n tests/netns/udhcpc.script
-          python3 -m py_compile tests/netns/*.py demo/nsproxy.py
+          python3 -m py_compile tests/netns/*.py demo/nsproxy.py deploy/pi5/portcullis-pilot-closed.py
   netns:
     timeout-minutes: 10
     runs-on: ubuntu-24.04
