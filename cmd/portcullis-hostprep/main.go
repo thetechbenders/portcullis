@@ -5,7 +5,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -28,7 +27,7 @@ func run(args []string, diag io.Writer) int {
 	}
 	if err := prepare(*identityPath, *output); err != nil {
 		// Fail without printing private MACs or caller-controlled file contents.
-		fmt.Fprintln(diag, "hostprep refused:", errors.Unwrap(err) != nil)
+		fmt.Fprintln(diag, "hostprep refused; private evidence and configuration are not printed")
 		return 1
 	}
 	fmt.Fprintln(diag, "private candidate files written; nothing installed or activated")
