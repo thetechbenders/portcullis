@@ -4,7 +4,7 @@
 [Unit]
 Description=Portcullis nftables guard bootstrap (first physical pilot)
 Documentation=https://github.com/thetechbenders/portcullis
-After=local-fs.target systemd-udev-settle.service
+After=local-fs.target systemd-udev-settle.service NetworkManager.service
 Before=portcullis-controller.service
 ConditionPathExists=/etc/portcullis/config.json
 RequiresMountsFor=/etc/portcullis/config.json
@@ -15,6 +15,7 @@ RemainAfterExit=yes
 # A failing preflight must never turn into a permissive bootstrap.
 # The configured guest interface must be DOWN before this unit starts.
 ExecStartPre=/usr/local/libexec/portcullis-pilot-closed /etc/portcullis/config.json
+ExecStartPre=/usr/local/libexec/portcullis-pilot-restrict /etc/portcullis/config.json
 ExecStart=/usr/local/bin/portcullisd bootstrap -config /etc/portcullis/config.json
 ExecStartPost=/usr/local/bin/portcullisd attest -config /etc/portcullis/config.json
 # The guard must survive service stop, rollback and failure. No ExecStop flush.
