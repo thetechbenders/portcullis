@@ -1,7 +1,6 @@
 package hostpolicy
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -58,5 +57,3 @@ func PermitUSBDeviceAuthorization(e USBAdmissionEvidence, a USBAdmissionApproval
 	}
 	return nil
 }
-
-var _ = errors.Is
