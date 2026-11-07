@@ -76,6 +76,34 @@ func RenderUplinkNetplanDefinition(i Identity) (string, error) {
 	return "ethernets:\n  eth0:\n    match:\n      macaddress: " + u + "\n    dhcp4: true\n    dhcp6: true\n", nil
 }
 
+// USBBootEvidence describes independently verified host properties. USB
+// authorization is global to the USB subsystem and therefore must not be
+// proposed when the root filesystem, management, or independently tested
+// recovery depends on USB. These booleans are evidence inputs, not attestations
+// performed by this package.
+type USBBootEvidence struct {
+	RootFilesystemNonUSB bool
+	ManagementPathNonUSB bool
+	RecoveryPathNonUSB   bool
+	KernelParameterSupported bool
+}
+
+// RenderUSBDefaultDenyKernelArg proposes kernel USB authorization lockdown.
+// usbcore.authorized_default=0 is applied before USB drivers bind, so a newly
+// enumerated USB Ethernet device cannot form a network interface until an
+// explicit device authorization. This affects ALL external and internal USB
+// devices other than root hubs, not just the Portcullis guest adapter.
+//
+// This is a boot-argument fragment, NOT a boot configuration file and NOT an
+// installer. The trusted authorizer that later permits one USB device must
+// still require separately attested firewall and admission state.
+func RenderUSBDefaultDenyKernelArg(e USBBootEvidence) (string, error) {
+	if !e.RootFilesystemNonUSB || !e.ManagementPathNonUSB || !e.RecoveryPathNonUSB || !e.KernelParameterSupported {
+		return "", fmt.Errorf("%w: kernel USB default-deny requires non-USB storage, management, recovery and kernel support", ErrUnsafePlan)
+	}
+	return "usbcore.authorized_default=0", nil
+}
+
 // RenderNftablesServiceOverride neutralizes the stock nftables.service
 // lifecycle, whose ExecStart and ExecStop flush the entire ruleset on this host.
 // Only use when the full nftables ruleset has an independently reviewed owner.
