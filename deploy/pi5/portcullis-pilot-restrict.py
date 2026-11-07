@@ -29,6 +29,8 @@ def restrict_guest(config_path, sysroot=pathlib.Path("/sys/class/net"), procroot
         raise ValueError("guest IPv6 policy unavailable")
     for key, desired in (("accept_ra", "0"), ("disable_ipv6", "1")):
         node = target / key
+        if not node.is_file():
+            raise ValueError("guest IPv6 sysctl missing")
         node.write_text(desired + "\n")
         if node.read_text().strip() != desired:
             raise ValueError("guest IPv6 policy readback failed")
