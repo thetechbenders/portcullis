@@ -57,7 +57,7 @@ func TestUSBDefaultDenyRequiresIndependentRecovery(t *testing.T) {
 		t.Fatalf("unexpected USB lockdown proposal: %q, %v", arg, err)
 	}
 	cases := []struct {
-		name string
+		name           string
 		breakCondition func(*USBBootEvidence)
 	}{
 		{"USB root storage", func(e *USBBootEvidence) { e.RootFilesystemNonUSB = false }},
