@@ -67,6 +67,11 @@ table inet portcullis_guard {
 		oif 17 counter drop comment "guest-ingress"
 		oifname "guest0" counter drop comment "guest-ingress-name"
 	}
+	chain guest_output {
+		type filter hook output priority -50; policy accept;
+		oif 17 counter drop comment "guest-output"
+		oifname "guest0" counter drop comment "guest-output-name"
+	}
 }
 `
 
@@ -82,6 +87,7 @@ func TestGuestDenyRulesPinKernelIndex(t *testing.T) {
 		`iif 17 counter drop comment "guest-input"`,
 		`iif 17 counter drop comment "guest-egress"`,
 		`oif 17 counter drop comment "guest-ingress"`,
+		`oif 17 counter drop comment "guest-output"`,
 	} {
 		if !strings.Contains(got, rule) {
 			t.Fatalf("missing index-pinned deny %q", rule)
@@ -101,6 +107,7 @@ func TestGuestDenyRulesPinKernelIndex(t *testing.T) {
 		`iifname "guest0" counter drop comment "guest-input-name"`,
 		`iifname "guest0" counter drop comment "guest-egress-name"`,
 		`oifname "guest0" counter drop comment "guest-ingress-name"`,
+		`oifname "guest0" counter drop comment "guest-output-name"`,
 	} {
 		if !strings.Contains(got, namedDeny) {
 			t.Fatalf("missing complementary guest-name deny %q", namedDeny)
@@ -142,7 +149,8 @@ func TestBootstrapAndVerifierShareRuleSpec(t *testing.T) {
 	}
 	rules := guardRules(c)
 	wantOrder := []string{"guest-dhcp", "guest-dns", "guest-portal", "guest-input", "guest-input-name",
-		"guest-protected", "grant-egress", "guest-egress", "guest-egress-name", "grant-ingress", "guest-ingress", "guest-ingress-name"}
+		"guest-protected", "grant-egress", "guest-egress", "guest-egress-name", "grant-ingress", "guest-ingress", "guest-ingress-name",
+		"guest-output", "guest-output-name"}
 	if len(rules) != len(wantOrder) || len(lines) != len(rules) {
 		t.Fatalf("rule count: spec %d rendered %d", len(rules), len(lines))
 	}
@@ -200,7 +208,7 @@ func TestVerifyGuardFixtures(t *testing.T) {
 	s := func(n int) time.Duration { return time.Duration(n) * time.Second }
 
 	empty, err := VerifyGuardJSON(readFixture(t, "guard_empty_nft-1.0.9.json"), c)
-	if err != nil || len(empty.Bound)+len(empty.Granted)+len(empty.GrantedDst) != 0 || len(empty.Counters) != 12 {
+	if err != nil || len(empty.Bound)+len(empty.Granted)+len(empty.GrantedDst) != 0 || len(empty.Counters) != 14 {
 		t.Fatalf("empty: %+v %v", empty, err)
 	}
 	got, err := VerifyGuardJSON(readFixture(t, "guard_elements_nft-1.0.9.json"), c)
