@@ -35,7 +35,7 @@ jobs:
         run: |
           for f in tests/netns/run.sh tests/netns/e2e.sh demo/portcullis-lab.sh; do bash -n "$f"; done
           sh -n tests/netns/udhcpc.script
-          python3 -m py_compile tests/netns/*.py demo/nsproxy.py deploy/pi5/portcullis-pilot-closed.py
+          python3 -m py_compile tests/netns/*.py demo/nsproxy.py deploy/pi5/portcullis-pilot-closed.py deploy/pi5/portcullis-pilot-restrict.py
   netns:
     timeout-minutes: 10
     runs-on: ubuntu-24.04
