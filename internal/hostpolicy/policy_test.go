@@ -64,3 +64,16 @@ func TestProvisioningIsExplicitlyGated(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUplinkNetplanRestrictsIdentityAndAutoconnect(t *testing.T) {
+	ids := Identity{GuestMAC: "02:00:00:00:00:11", UplinkMAC: "02:00:00:00:00:22", ManagementMAC: "02:00:00:00:00:33"}
+	got, err := RenderUplinkNetplanDefinition(ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"name: eth0", "macaddress: " + ids.UplinkMAC, "activation-mode: manual"} {
+		if !strings.Contains(got, want+"\n") {
+			t.Errorf("uplink definition missing %q", want)
+		}
+	}
+}
