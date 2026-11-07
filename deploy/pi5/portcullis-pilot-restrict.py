@@ -34,6 +34,9 @@ def restrict_guest(config_path, sysroot=pathlib.Path("/sys/class/net"), procroot
         node.write_text(desired + "\n")
         if node.read_text().strip() != desired:
             raise ValueError("guest IPv6 policy readback failed")
+    for key, desired in (("accept_ra", "0"), ("disable_ipv6", "1")):
+        if (target / key).read_text().strip() != desired:
+            raise ValueError("guest IPv6 final state drifted")
     if int((physical / "flags").read_text().strip(), 0) & 1:
         raise ValueError("guest unexpectedly became UP")
     return True
