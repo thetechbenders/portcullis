@@ -76,7 +76,6 @@ func prepare(identityPath, output string) error {
 	for filename, content := range map[string]string{
 		"20-portcullis-ethernet-ownership.conf": nm,
 		"uplink-netplan-fragment.yaml":          netplan,
-		"nftables-service-override.candidate":   hostpolicy.RenderNftablesServiceOverride(),
 	} {
 		if err := os.WriteFile(filepath.Join(output, filename), []byte(content), 0600); err != nil {
 			return fmt.Errorf("output: cannot write candidate")

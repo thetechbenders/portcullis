@@ -130,6 +130,16 @@ func (k *Kernel) FlushGrants(ctx context.Context) error {
 // with "create table", so the kernel also rejects it if a table appears
 // concurrently. The installed guard is attested before success is reported.
 func (k *Kernel) Bootstrap(ctx context.Context) error {
+	return k.bootstrap(ctx, false)
+}
+
+// EnsureClosedGuard installs a missing guard or readopts a verified, empty
+// guard during supervised restart. It never repairs or replaces existing rules.
+func (k *Kernel) EnsureClosedGuard(ctx context.Context) error {
+	return k.bootstrap(ctx, true)
+}
+
+func (k *Kernel) bootstrap(ctx context.Context, reuseClosed bool) error {
 	if err := k.Guard.Validate(); err != nil {
 		return err
 	}
@@ -142,9 +152,25 @@ func (k *Kernel) Bootstrap(ctx context.Context) error {
 	}
 	switch _, err := k.NFT.ListGuard(ctx); {
 	case err == nil:
-		return ErrGuardExists
+		if !reuseClosed {
+			return ErrGuardExists
+		}
+		return k.AttestClosed(ctx)
 	case !errors.Is(err, kernel.ErrTableAbsent):
 		return err
+	}
+	if reuseClosed {
+		// Refuse known bypass and topology failures before committing rules.
+		ruleset, err := k.NFT.ListRuleset(ctx)
+		if err != nil {
+			return err
+		}
+		if err := enforce.VerifyNoBypass(ruleset, k.Guard); err != nil {
+			return err
+		}
+		if err := k.checkTopology(ctx); err != nil {
+			return err
+		}
 	}
 	batch, err := enforce.RenderGuardBootstrap(k.Guard)
 	if err != nil {
@@ -153,8 +179,30 @@ func (k *Kernel) Bootstrap(ctx context.Context) error {
 	if err := k.NFT.Apply(ctx, batch); err != nil {
 		return err
 	}
+	if reuseClosed {
+		return k.AttestClosed(ctx)
+	}
 	_, err = k.Attest(ctx)
 	return err
+}
+
+// AttestClosed is a read-only check of the guest link and an empty guard.
+func (k *Kernel) AttestClosed(ctx context.Context) error {
+	guest, err := k.Link.Inspect(ctx, k.Guard.Guest)
+	if err != nil {
+		return err
+	}
+	if guest.Up {
+		return ErrGuestUp
+	}
+	state, err := k.Attest(ctx)
+	if err != nil {
+		return err
+	}
+	if len(state.Bound)+len(state.Granted)+len(state.GrantedDst) != 0 {
+		return errors.New("refusing closed-guest startup: guard has live elements")
+	}
+	return nil
 }
 
 // Flows deletes conntrack state for a guest address in both directions.

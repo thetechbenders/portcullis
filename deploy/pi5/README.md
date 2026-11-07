@@ -1,76 +1,123 @@
-# Pi 5 first-silicon pilot (supervised, wired guest disconnected)
+# Pi 5 supervised first installation
 
-**Status: candidate installer assets and test procedure. NOT authorized for remote application, reboot, live cable connection or autonomous connected boot.** The software in this directory is for a supervised first installation after independent console recovery is demonstrated. V3 host observations are snapshots, not deployment permission.
+Keep the guest RJ45 physically disconnected throughout installation, readback
+and rollback. Use an independently demonstrated local or serial login for the
+transaction, and verify a second SSH connection through `wlan0`. Leave the
+onboard uplink disconnected during this stage. The endpoint is an administratively
+DOWN guest with an empty, attested guard. The controller and portal stay stopped.
+Do not set `usbcore.authorized_default=0` in this pilot.
 
-## Purpose and boundary
+## Private preparation
 
-This package is intended to move Portcullis beyond offline policy renderers onto the Raspberry Pi 5 **without exposing a guest network**. It supports initial binary/config installation and a one-time nft guard bootstrap with the guest cable physically disconnected. The current Go controller still requires a separately configured guest IPv4 address, protected isolated uplink and portal before the connected end-to-end trial.
+1. Build the checked-out commit with
+   `GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o /PRIVATE/bin/ ./cmd/...`.
+   Record the commit and hash the delivered files. Build `portcullis-hostprep`
+   and `portcullis-policy` for the preparation machine as well.
+2. Inspect the actual protected Netplan sources in all three precedence
+   directories, effective and active NetworkManager ownership, the SSH return
+   route, service files and firewall inventory. The transaction below assumes
+   the stock nftables unit is disabled and inactive, the ruleset is empty, and
+   there is no existing Portcullis installation. A different owner or policy
+   needs its own scoped migration.
+3. Record the boot ID, physical ancestry, current and permanent MACs, drivers,
+   ifindices, USB VID/PID, guest IPv6 settings, and SSH peer privately. The
+   installed `pilot-pins.json` contains `boot_id`, `ssh_peer`, and `guest`,
+   `uplink`, and `management` objects with `device` (resolved sysfs path),
+   `mac`, and `ifindex`. Add `usb_id` (two strings) and `original_ipv6`
+   (`accept_ra` and `disable_ipv6`, both strings) to the guest object.
+   A different boot or interface generation requires fresh inspection.
+4. Write an owner-only JSON file with `GuestMAC`, `UplinkMAC` and
+   `ManagementMAC`. Run `portcullis-hostprep -identities FILE -out NEW_DIR`.
+   Its strict NetworkManager rule excludes Ethernet except the verified
+   onboard uplink. Compare it with the effective config and preserve unrelated
+   settings. The Wi-Fi device falls outside the Ethernet selector.
+5. Replace only the broad match in the existing persistent wired Netplan
+   definition. Keep its UUID, DHCP settings and other profile properties.
+   Use the rendered onboard name and permanent MAC match and
+   `activation-mode: manual` so this installation cannot autoconnect the wired
+   profile. Keep the existing Wi-Fi source byte-for-byte. Run
+   `python3 validate-netplan.py BASELINE_ROOT CANDIDATE_WIRED_YAML pilot-pins.json`
+   to generate baseline, candidate and restored profiles in a temporary root.
+   Review the generator's NetworkManager device configuration as well as the
+   generated profile scope.
+6. Prepare a private `config.json` with the pinned guest name and `eth0`.
+   Pick an unused guest subnet. The closed pilot assigns no addresses.
+   Run `portcullis-policy -guard-config config.json > guard.nft` and validate
+   it with `nft --check --file guard.nft` on the Pi while the table is absent.
+   On an offline machine supply `-guest-ifindex INDEX` from the private pins.
+   The closed guard commands require `ip` and `nft`. The future connected
+   controller also requires `conntrack`.
 
-It does not enable or restart services by itself. Do not enable this unit at boot until a separate cold-boot and hotplug contract has been accepted.
+## Installation after explicit approval
 
-**Do not apply `usbcore.authorized_default=0` in this first pilot.** It affects every USB device. The separate USB policy renderer is for future independently recovered unattended testing, not the first supervised installation.
+Work from the verified console with both Ethernet cables disconnected. Recheck
+the complete source hashes and runtime assumptions before proceeding. Use
+root-only staging and backup directories. Keep original bytes, ownership and
+modes with `cp -a`. Refuse destination symlinks or unexpected preexisting
+files, masks, profiles or units.
 
-## Physical invariants
+1. Save the exact wired YAML and hash the Wi-Fi sources. Record current NM
+   config, SSH route, guest flags, sysctls, nftables unit states and ruleset.
+   Confirm the stock `nftables.service` is disabled/inactive and its mask
+   destination absent. It must stay inactive throughout. Use
+   `systemctl --no-reload mask nftables.service`. The mask stops future stock
+   start/restart jobs from executing the global flush without pretending
+   that a replacement firewall loaded. It has no effect on other tables.
+2. Install the scoped NM snippet in `/etc/NetworkManager/conf.d/` and the
+   validated replacement at the original wired YAML path. Leave Wi-Fi source
+   files and existing active connections alone. Run `netplan generate`,
+   `nmcli general reload conf`, then `nmcli connection reload`. Verify that
+   the effective NM configuration includes the exact strict exclusion and
+   that the live guest is unmanaged and both other roles remain managed.
+   Confirm the SSH return route and second connection. No NM restart or
+   `netplan apply` is needed.
+3. Install the verified ARM64 `portcullisd` in `/usr/local/bin/`, the helper
+   as `/usr/local/libexec/portcullis-pilot-closed`, and the config and pins in
+   `/etc/portcullis/` with root-only access. Run the helper with
+   `close /etc/portcullis/config.json`. It verifies the pinned roles,
+   ownership, and carrier before setting the guest DOWN and reads back
+   guest flags, addresses, routes and management routing afterward.
+4. Install `portcullis-guard.service` under `/etc/systemd/system/`, run
+   `systemctl daemon-reload` and `systemctl start portcullis-guard.service`.
+   The static unit requires an already-running NetworkManager and never
+   pulls it in. It requires the stock nftables service to be masked and
+   inactive. It checks the closed link, restricts guest IPv6, then bootstraps
+   or readopts an exact empty guard and verifies the link again. Stop or
+   failed start leaves any installed guard in place. A restart refuses a
+   malformed or populated table. The helper never brings a link UP.
+5. Require an active/exited guard unit and run the helper with
+   `attest /etc/portcullis/config.json`. Verify the mask, guest DOWN,
+   guest-only IPv6 policy, unchanged Wi-Fi source and the second SSH
+   connection through `wlan0`. Keep the unit static and the cable disconnected.
 
-- Guest RJ45 cable is physically **disconnected**, before/during changes and rollback.
-- Management: `wlan0`, independently verified SSH return route, live Wi-Fi preserved.
-- Uplink: onboard `eth0`, not a default-route fallback; future test peer must be isolated.
-- Guest: the fresh, independently pinned Plugable USB device. Private permanent MAC, USB parent, driver, VID:PID, ifindex and active generation are verified before each step.
-- Independently demonstrated local or serial recovery and a tested, bounded rollback mechanism exist. **An SSH session or getty listing is not such recovery.**
-- No other manager or cloud-init rule may raise the guest. If a device match, policy readback or management route drifts, STOP and keep the cable disconnected.
-- Never install a lifecycle override that masks nftables load/stop behavior unless another verified owner restores and attests the guard at boot.
+## Failure and rollback
 
-## Offline preparation (safe on a developer machine)
+Stop at the first failed check and keep the cable disconnected. Use the
+console if management is impaired. Before undoing a successful guard
+installation, use the pinned helper's `close` and `attest` operations to
+prove ownership and empty sets. Stop the static unit. If and only if this
+transaction created the now-attested table, delete **only**
+`inet portcullis_guard`. Leave ambiguous or damaged state for console
+reconciliation. Restore the saved guest IPv6 knobs with `restore-ipv6` while
+the guest remains excluded and DOWN. A failed installation can leave the
+stricter IPv6 values in place.
 
-Build binaries from an exact reviewed commit:
+Restore the exact backed-up wired YAML, remove only the installed NM snippet
+and unit, regenerate the backed-up source, and reload NM config and
+connections as above. Verify the second SSH connection. This can restore
+the original broad Ethernet eligibility, so maintain physical disconnection.
+Remove the pilot files and unmask the stock unit only after the guard is gone
+and the baseline is confirmed. Leave the stock unit disabled/inactive. If a
+mask or network file changed outside this transaction, preserve the evidence
+and reconcile it from the console. Never flush the ruleset.
 
-```sh
-go build -o ./out/portcullisd ./cmd/portcullisd
-go build -o ./out/portcullis-hostprep ./cmd/portcullis-hostprep
-go test -count=1 ./...
-go vet ./...
-python3 -m unittest discover -s deploy/pi5 -p 'test_*.py' -v
-```
+## Physical acceptance after this stage
 
-Create an **owner-only** private JSON identity file outside the repository:
+This procedure checks the closed, cable-disconnected install. A connected
+pilot separately needs an isolated uplink peer, guest IPv4/DHCP, portal and
+DNS, and physical ingress/egress, IPv6 and non-IP packet tests. Prove USB
+re-enumeration, nftables lifecycle, fault recovery and independent rollback
+before considering unattended connected boot. The static unit has no boot
+or hotplug trigger. A post-enumeration check is not an early packet barrier.
 
-```json
-{"GuestMAC":"<verified guest permanent MAC>","UplinkMAC":"<verified onboard eth0 permanent MAC>","ManagementMAC":"<verified wlan0 permanent MAC>"}
-```
-
-The example placeholder values are not valid actual device identities. The file must have mode 0600. Never commit it, paste it into a PR, or pass its contents as command-line arguments.
-
-```sh
-./out/portcullis-hostprep -identities /PRIVATE/identities.json -out /PRIVATE/new-pilot-candidates
-```
-
-The generator creates a 0700 directory with 0600 files, refuses existing output directories, validates distinct nonmulticast role MACs, and **writes no /etc configuration**. Review the output privately. The strict NetworkManager candidate is `[keyfile] unmanaged-devices=type:ethernet;except:mac:<uplink>`; NetworkManager's device-list syntax gives the `except:` selector precedence. The Netplan fragment is **not a complete YAML replacement** and must be reconciled with the current protected source without touching the WLAN section.
-
-## Separate supervised installation transaction (NOT executed by this PR)
-
-Only after independent recovery/rollback is tested and a specific transaction is authorized:
-
-1. Back up exact existing file bytes, ownership, modes and loaded states for `/etc/NetworkManager/conf.d/`, `/etc/netplan/`, relevant systemd units, and firewall inventory to a private owner-only directory. Keep an independently triggered recovery mechanism; never rely on this SSH session for rollback.
-2. Confirm management connectivity and `wlan0` return route. Confirm guest physical cable disconnect and absence of guest carrier/addresses/routes. Verify physical device identities again.
-3. Install the reviewed guest-deny NetworkManager snippet, preserving unrelated list semantics. Reconcile persistent Netplan Ethernet source with the MAC-scoped uplink, preserving Wi-Fi credentials and passthrough. **Do not hand-edit generated /run files**. Verify effective policy and exactly which Ethernet devices are manageable. Do not restart all networking.
-4. With the guest physically disconnected, explicitly enforce guest DOWN and read it back. Verify NetworkManager reports guest unmanaged and management still uses `wlan0`; if either check fails, stop immediately.
-5. Install the separately validated `portcullisd` binary, private `/etc/portcullis/config.json`, executable helpers as `/usr/local/libexec/portcullis-pilot-closed` and `/usr/local/libexec/portcullis-pilot-restrict`, and `portcullis-guard.service` as a systemd unit. Do **not** enable the unit yet.
-6. Manually start the guard unit once. The preflight checks physical guest ancestry, DOWN, absent/unverified carrier, NetworkManager exclusion and exclusive `wlan0` default route. The restriction helper disables IPv6/RA on **only** the verified DOWN guest. `portcullisd bootstrap` refuses an already-existing table or UP guest. `portcullisd attest` independently checks the guard, bypass and topology. A failure authorizes **no** link UP or cable connection.
-7. Keep guest DOWN and physically disconnected. Inspect nftables guard and service state. The distro `nftables.service` remains a global-flush hazard until the reviewed ownership/lifecycle candidate is applied as part of its own protected transaction. Never start/reload/stop that stock service while relying on the Portcullis guard.
-8. Capture the finished state privately. A successful first pilot means **guard installed and attested on a closed guest**, not a functioning or connected captive portal.
-
-**The service is deliberately manual-only for this first silicon test.** The unit must not be enabled or used as an automatic hotplug actor until boot ordering and independent device admission are tested.
-
-## Rollback
-
-Keep guest Ethernet physically disconnected throughout. Independently verify the working console/recovery path, then remove or disable only the **transaction-owned, version-matched** service installation and restore exact backed-up NetworkManager/Netplan files with original permissions and ownership. Do not issue a global `nft flush ruleset` or delete arbitrary nftables tables. Never restore the broad wired profile while guest exposure is connected. Record residual Portcullis guard state and require independent reconciliation rather than replacing a live hooked table.
-
-For a failure after guard installation, keep guest DOWN and cable disconnected. Do not try to recover by deleting the guard or accepting an unknown preexisting table. Use the independent recovery route to restore management first.
-
-## Physical follow-on acceptance (separate authorization)
-
-An authorized isolated packet pilot requires known guest IPv4 configuration, independent uplink peer, functional DHCP/portal/DNS, nftables INPUT/FORWARD/OUTPUT counter tests, loss/restart fault injection, USB re-enumeration, nftables reload/service-lifecycle tests, and the tested console rollback. It requires physically connecting the guest to an isolated test peer **only after** those specific checks and an explicit go decision.
-
-Unattended connected-boot requires a separate proven pre-driver USB authorization path or equivalently trusted exposure gate. The current pure USB admission code is not an installed privileged authorizer.
-
-Reference: [V3 privileged host audit](https://drive.google.com/file/d/1qQ63U711djpSzAeJaGs-UUdlv-zccp5p/view).
+[V3 privileged host audit](https://drive.google.com/file/d/1qQ63U711djpSzAeJaGs-UUdlv-zccp5p/view)

@@ -1,6 +1,7 @@
 // Command portcullisd is the privileged Portcullis enforcement controller.
 //
 //	portcullisd bootstrap -config F   install the guard while the guest link is down
+//	portcullisd bootstrap-closed -config F   ensure an empty guard with guest down
 //	portcullisd attest -config F      verify guard, bypass paths and topology
 //	portcullisd run -config F         serve DHCP and the control sockets
 //
@@ -55,7 +56,7 @@ func main() {
 		fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	k, flows, err := newKernel(cfg)
+	k, err := newKernel(cfg)
 	if err != nil {
 		fatal(err)
 	}
@@ -68,6 +69,16 @@ func main() {
 			fatal(err)
 		}
 		fmt.Println("guard installed and attested; guest interface may now be brought up")
+	case "bootstrap-closed":
+		if err := k.EnsureClosedGuard(ctx); err != nil {
+			fatal(err)
+		}
+		fmt.Println("closed-guest guard attested")
+	case "attest-closed":
+		if err := k.AttestClosed(ctx); err != nil {
+			fatal(err)
+		}
+		fmt.Println("closed-guest guard attested")
 	case "attest":
 		state, err := k.Attest(ctx)
 		if err != nil {
@@ -76,6 +87,11 @@ func main() {
 		fmt.Printf("guard attested: %d bound, %d granted, %d granted_dst elements\n",
 			len(state.Bound), len(state.Granted), len(state.GrantedDst))
 	case "run":
+		ctExec, err := kernel.NewExec(cfg.ConntrackPath, commandTimeout)
+		if err != nil {
+			fatal(err)
+		}
+		flows := gateway.Flows{Conntrack: kernel.NewConntrack(ctExec)}
 		if err := run(ctx, cfg, k, flows, log, *readyFile); err != nil {
 			fatal(err)
 		}
@@ -84,22 +100,18 @@ func main() {
 	}
 }
 
-func newKernel(cfg *config.Config) (*gateway.Kernel, gateway.Flows, error) {
+func newKernel(cfg *config.Config) (*gateway.Kernel, error) {
 	nftExec, err := kernel.NewExec(cfg.NFTPath, commandTimeout)
 	if err != nil {
-		return nil, gateway.Flows{}, err
+		return nil, err
 	}
 	ipExec, err := kernel.NewExec(cfg.IPPath, commandTimeout)
 	if err != nil {
-		return nil, gateway.Flows{}, err
-	}
-	ctExec, err := kernel.NewExec(cfg.ConntrackPath, commandTimeout)
-	if err != nil {
-		return nil, gateway.Flows{}, err
+		return nil, err
 	}
 	guard := enforce.GuardConfigFrom(cfg)
 	if err := guard.Validate(); err != nil {
-		return nil, gateway.Flows{}, err
+		return nil, err
 	}
 	k := &gateway.Kernel{
 		Guard:    guard,
@@ -107,7 +119,7 @@ func newKernel(cfg *config.Config) (*gateway.Kernel, gateway.Flows, error) {
 		Link:     kernel.NewLink(ipExec),
 		Topology: kernel.Topology{ProcRoot: "/proc"},
 	}
-	return k, gateway.Flows{Conntrack: kernel.NewConntrack(ctExec)}, nil
+	return k, nil
 }
 
 func run(ctx context.Context, cfg *config.Config, k *gateway.Kernel, flows gateway.Flows, log *slog.Logger, readyFile string) error {
@@ -238,7 +250,7 @@ func startController(ctx context.Context, ctrl startupController, log *slog.Logg
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: portcullisd {bootstrap|attest|run} -config FILE [-ready-file FILE]")
+	fmt.Fprintln(os.Stderr, "usage: portcullisd {bootstrap|bootstrap-closed|attest|attest-closed|run} -config FILE [-ready-file FILE]")
 	os.Exit(2)
 }
 

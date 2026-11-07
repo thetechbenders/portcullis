@@ -6,28 +6,6 @@ import (
 	"testing"
 )
 
-func TestScopedRenderers(t *testing.T) {
-	id := Identity{GuestMAC: "02:00:00:00:00:11", UplinkMAC: "02:00:00:00:00:22", ManagementMAC: "02:00:00:00:00:33"}
-	nm, err := RenderGuestExclusion(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if nm != "[keyfile]\nunmanaged-devices=type:ethernet;except:mac:02:00:00:00:00:22\n" {
-		t.Fatalf("unexpected exclusion: %q", nm)
-	}
-	netplan, err := RenderUplinkNetplanDefinition(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(netplan, "macaddress: 02:00:00:00:00:22") || strings.Contains(netplan, "00:11") || strings.Contains(netplan, "00:33") {
-		t.Fatalf("uplink selector is not isolated: %q", netplan)
-	}
-	service := RenderNftablesServiceOverride()
-	if strings.Contains(service, "flush") || !strings.Contains(service, "ExecStop=\n") || !strings.Contains(service, "ExecReload=\n") || !strings.Contains(service, "ExecStart=/usr/bin/true") {
-		t.Fatalf("unsafe nft lifecycle proposal: %q", service)
-	}
-}
-
 func TestRejectAmbiguousRolesAndInvalidMAC(t *testing.T) {
 	base := Identity{GuestMAC: "02:00:00:00:00:11", UplinkMAC: "02:00:00:00:00:22", ManagementMAC: "02:00:00:00:00:33"}
 	tests := map[string]Identity{

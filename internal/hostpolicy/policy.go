@@ -73,7 +73,7 @@ func RenderUplinkNetplanDefinition(i Identity) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "ethernets:\n  eth0:\n    match:\n      macaddress: " + u + "\n    dhcp4: true\n    dhcp6: true\n", nil
+	return "ethernets:\n  eth0:\n    match:\n      name: eth0\n      macaddress: " + u + "\n    activation-mode: manual\n    dhcp4: true\n    dhcp6: true\n", nil
 }
 
 // USBBootEvidence describes independently verified host properties. USB
@@ -102,15 +102,6 @@ func RenderUSBDefaultDenyKernelArg(e USBBootEvidence) (string, error) {
 		return "", fmt.Errorf("%w: kernel USB default-deny requires non-USB storage, management, recovery and kernel support", ErrUnsafePlan)
 	}
 	return "usbcore.authorized_default=0", nil
-}
-
-// RenderNftablesServiceOverride neutralizes the stock nftables.service
-// lifecycle, whose ExecStart and ExecStop flush the entire ruleset on this host.
-// Only use when the full nftables ruleset has an independently reviewed owner.
-// It must NEVER be applied before that owner, rollback and recovery exist.
-// This is NOT a substitute for installing or attesting the Portcullis guard.
-func RenderNftablesServiceOverride() string {
-	return "[Service]\nExecStart=\nExecStart=/usr/bin/true\nExecReload=\nExecStop=\n"
 }
 
 // EvaluateProvisioning rejects attempts to construe generated configuration as

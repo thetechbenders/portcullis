@@ -160,7 +160,31 @@ ip netns exec "$ns_wan" ping -6 -n -c 1 -W 2 2001:db8:203::2
 gw sysctl -qw net.ipv6.conf.guest0.disable_ipv6=1
 a sysctl -qw net.ipv6.conf.eth0.disable_ipv6=1
 ip -n "$ns_gw" link set guest0 down
-gw "$state/bin/portcullisd" bootstrap -config "$state/portcullis.json"
+# The closed-only Pi entry point does not need conntrack and may readopt an
+# exact empty table. It must reject UP, a missing link, and corrupt guards.
+python3 - "$state/portcullis.json" "$state/pilot.json" <<'PILOT'
+import json, sys
+with open(sys.argv[1]) as f:
+    cfg = json.load(f)
+cfg["conntrack_path"] = "/usr/sbin/portcullis-test-absent-conntrack"
+with open(sys.argv[2], "w") as f:
+    json.dump(cfg, f)
+PILOT
+pilot() { gw "$state/bin/portcullisd" "$1" -config "$state/pilot.json"; }
+ip -n "$ns_gw" link set guest0 up
+if pilot bootstrap-closed; then die 'closed bootstrap accepted UP'; fi
+ip -n "$ns_gw" link set guest0 down
+ip -n "$ns_gw" link set guest0 name missing0
+if pilot bootstrap-closed; then die 'closed bootstrap accepted missing guest'; fi
+ip -n "$ns_gw" link set missing0 name guest0
+pilot bootstrap-closed
+pilot bootstrap-closed
+pilot attest-closed
+gw nft add rule inet portcullis_guard guest_output counter accept
+if pilot bootstrap-closed; then die 'closed bootstrap accepted corrupt guard'; fi
+if pilot attest-closed; then die 'closed attest accepted corrupt guard'; fi
+gw nft delete table inet portcullis_guard
+pilot bootstrap-closed
 # An interface-name guard under policy accept leaks on rename. Prove the
 # index-pinned INPUT and both FORWARD deny directions survive a new name.
 # This is a disposable namespace fixture with no controller/client service up.

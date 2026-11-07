@@ -43,7 +43,6 @@ func TestPreparePrivateOfflineArtifacts(t *testing.T) {
 	for _, name := range []string{
 		"20-portcullis-ethernet-ownership.conf",
 		"uplink-netplan-fragment.yaml",
-		"nftables-service-override.candidate",
 	} {
 		fi, err := os.Stat(filepath.Join(out, name))
 		if err != nil || fi.Mode().Perm() != 0600 {
