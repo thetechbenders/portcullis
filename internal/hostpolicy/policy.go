@@ -47,16 +47,21 @@ func validate(i Identity) (string, string, error) {
 	return g, u, nil
 }
 
-// RenderGuestExclusion proposes strict NetworkManager exclusion scoped to the
-// permanent guest MAC. A generated type:ethernet managed=1 rule and an existing
-// broad wired autoconnect profile must still be tested against this directive.
-// An exclusion match failure must not enable physical link exposure.
+// RenderGuestExclusion uses a negative allowlist: strictly exclude ALL
+// Ethernet devices from NetworkManager except the attested onboard uplink.
+// This also excludes a re-enumerated guest with a new MAC/name rather than
+// failing open when a narrow guest-specific selector misses. The management
+// Wi-Fi device is not matched by type:ethernet. The except clause does NOT
+// override other reasons an uplink might already be unmanaged.
+//
+// This prevents automatic NetworkManager adoption; it does NOT enforce
+// IFF_DOWN, block another network manager, or establish pre-packet isolation.
 func RenderGuestExclusion(i Identity) (string, error) {
-	g, _, err := validate(i)
+	_, uplink, err := validate(i)
 	if err != nil {
 		return "", err
 	}
-	return "[keyfile]\nunmanaged-devices=mac:" + g + "\n", nil
+	return "[keyfile]\nunmanaged-devices=type:ethernet;except:mac:" + uplink + "\n", nil
 }
 
 // RenderUplinkNetplanDefinition is a narrow replacement for the *Ethernet*
