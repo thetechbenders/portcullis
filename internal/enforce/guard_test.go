@@ -316,6 +316,22 @@ func TestVerifyGuardRejectsMutations(t *testing.T) {
 			}
 			return l
 		},
+		"missing output hook": func(l []any) []any {
+			_, ch := find(l, "chain", "name", chainOutput)
+			delete(ch, "hook")
+			return l
+		},
+		"host output deny becomes accept": func(l []any) []any {
+			e := ruleExpr(l, "guest-output")
+			e[len(e)-1] = map[string]any{"accept": nil}
+			return l
+		},
+		"host response escapes guest binding": func(l []any) []any {
+			_, r := find(l, "rule", "comment", "host-portal")
+			e := r["expr"].([]any)
+			r["expr"] = append(e[:1:1], e[2:]...)
+			return l
+		},
 		"wrong hook": func(l []any) []any {
 			_, ch := find(l, "chain", "name", chainForward)
 			ch["hook"] = "prerouting"
