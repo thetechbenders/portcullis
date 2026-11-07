@@ -1,0 +1,24 @@
+# Portcullis Pi 5 supervised first-pilot service
+# NOT an unattended connected-boot exposure guarantee.
+# Install only with guest RJ45 physically disconnected and independent recovery.
+[Unit]
+Description=Portcullis nftables guard bootstrap (first physical pilot)
+Documentation=https://github.com/thetechbenders/portcullis
+After=local-fs.target systemd-udev-settle.service
+Before=portcullis-controller.service
+ConditionPathExists=/etc/portcullis/config.json
+RequiresMountsFor=/etc/portcullis/config.json
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# A failing preflight must never turn into a permissive bootstrap.
+# The configured guest interface must be DOWN before this unit starts.
+ExecStart=/usr/local/bin/portcullisd bootstrap -config /etc/portcullis/config.json
+ExecStartPost=/usr/local/bin/portcullisd attest -config /etc/portcullis/config.json
+# The guard must survive service stop, rollback and failure. No ExecStop flush.
+TimeoutStartSec=40
+NoNewPrivileges=no
+
+[Install]
+WantedBy=multi-user.target
