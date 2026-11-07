@@ -71,6 +71,17 @@ func RenderUplinkNetplanDefinition(i Identity) (string, error) {
 	return "ethernets:\n  eth0:\n    match:\n      macaddress: " + u + "\n    dhcp4: true\n    dhcp6: true\n", nil
 }
 
+// RenderGuestLinkDown proposes a guest-only systemd .link activation default.
+// It is defense in depth, not independent pre-packet isolation: link rules are
+// applied after netdevice registration and a missed match can fail open.
+func RenderGuestLinkDown(i Identity) (string, error) {
+	g, _, err := validate(i)
+	if err != nil {
+		return "", err
+	}
+	return "[Match]\nPermanentMACAddress=" + g + "\n[Link]\nActivationPolicy=down\nRequiredForOnline=no\n", nil
+}
+
 // RenderNftablesServiceOverride neutralizes the stock nftables.service
 // lifecycle, whose ExecStart and ExecStop flush the entire ruleset on this host.
 // Only use when the full nftables ruleset has an independently reviewed owner.
