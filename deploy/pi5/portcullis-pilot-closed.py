@@ -28,9 +28,15 @@ def closed(config_path, sysroot=pathlib.Path("/sys/class/net"), run=subprocess.r
     flags = int((guest_dir / "flags").read_text().strip(), 0)
     if flags & 1:
         raise ValueError("guest administratively UP")
-    # Missing carrier evidence is unknown, not a safe zero.
-    if (guest_dir / "carrier").read_text().strip() != "0":
-        raise ValueError("guest carrier is present or unverified")
+    # Linux may reject reading carrier while IFF_UP is clear (EINVAL).
+    # On this supervised first pilot, physical RJ45 disconnection is an
+    # operator prerequisite, NOT a sensor attestation.
+    try:
+        carrier = (guest_dir / "carrier").read_text().strip()
+    except OSError:
+        carrier = "unknown"
+    if carrier not in ("0", "unknown"):
+        raise ValueError("guest carrier detected")
     nm = run(
         ["/usr/bin/nmcli", "-t", "-f", "GENERAL.NM-MANAGED", "device", "show", guest],
         capture_output=True, text=True, timeout=5, check=True,
