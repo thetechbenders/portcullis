@@ -196,6 +196,7 @@ func guardRules(c GuardConfig) []guardRule {
 	guestIndexIn, guestIndexOut := termIfIndex("iif", c.GuestIfIndex, c.Guest), termIfIndex("oif", c.GuestIfIndex, c.Guest)
 	upIn, upOut := termIfname("iifname", c.Uplink), termIfname("oifname", c.Uplink)
 	toGateway := guardTerm{text: "ip daddr " + c.GatewayV4.String(), expr: jmatch("==", jpayload("ip", "daddr"), c.GatewayV4.String())}
+	fromGateway := guardTerm{text: "ip saddr " + c.GatewayV4.String(), expr: jmatch("==", jpayload("ip", "saddr"), c.GatewayV4.String())}
 	nfproto := guardTerm{text: "meta nfproto ipv4", expr: jmatch("==", jmeta("nfproto"), "ipv4")}
 	toGrantedDst := guardTerm{text: "ip daddr @" + SetGrantedDst, expr: jmatch("==", jpayload("ip", "daddr"), "@"+SetGrantedDst)}
 	original := guardTerm{text: "ct direction original", expr: jmatch("==", map[string]any{"ct": map[string]any{"key": "direction"}}, "original")}
@@ -222,6 +223,11 @@ func guardRules(c GuardConfig) []guardRule {
 		// INPUT authorization still gates which guest requests can reach them.
 		{chainOutput, "host-dhcp", []guardTerm{guestOut, guestIndexOut, nfproto, termPort("udp", "sport", 67), termPort("udp", "dport", 68)}, "accept"},
 		{chainOutput, "host-reply", []guardTerm{guestOut, guestIndexOut, nfproto, established}, "accept"},
+		// Stateless DNS/portal responses may be INVALID to conntrack after a
+		// controller fault or upstream state change; constrain them to the
+		// gateway service ports, never a generic OUTPUT accept.
+		{chainOutput, "host-dns", []guardTerm{guestOut, guestIndexOut, fromGateway, termPort("udp", "sport", c.DNSPort)}, "accept"},
+		{chainOutput, "host-portal", []guardTerm{guestOut, guestIndexOut, fromGateway, termPort("tcp", "sport", c.PortalPort)}, "accept"},
 		{chainOutput, "guest-output", []guardTerm{guestIndexOut}, "drop"},
 		{chainOutput, "guest-output-name", []guardTerm{guestOut}, "drop"},
 	}
