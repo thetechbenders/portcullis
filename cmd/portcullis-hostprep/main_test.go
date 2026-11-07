@@ -25,8 +25,8 @@ func privateInput(t *testing.T, id hostpolicy.Identity) string {
 
 func testIDs() hostpolicy.Identity {
 	return hostpolicy.Identity{
-		GuestMAC: "02:00:00:00:00:11",
-		UplinkMAC: "02:00:00:00:00:22",
+		GuestMAC:      "02:00:00:00:00:11",
+		UplinkMAC:     "02:00:00:00:00:22",
 		ManagementMAC: "02:00:00:00:00:33",
 	}
 }
